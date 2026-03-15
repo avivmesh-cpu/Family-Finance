@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block page_title %}Overview{% endblock %}
+{% block page_subtitle %}Your complete financial picture at a glance{% endblock %}
+
+{% block content %}
+<div class="page-body">
+  <div class="kpi-grid" id="overview-kpis">
+    <div class="kpi-card green">
+      <div class="kpi-label">Total Assets</div>
+      <div class="kpi-value green" id="kpi-assets">—</div>
+      <div class="kpi-sub">All accounts combined</div>
+    </div>
+    <div class="kpi-card red">
+      <div class="kpi-label">Mortgage Balance</div>
+      <div class="kpi-value red" id="kpi-mortgage">—</div>
+      <div class="kpi-sub">Remaining</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">This Month Income</div>
+      <div class="kpi-value" id="kpi-income">—</div>
+      <div class="kpi-sub" id="kpi-income-sub">Salaries + other</div>
+    </div>
+    <div class="kpi-card blue">
+      <div class="kpi-label">This Month Expenses</div>
+      <div class="kpi-value blue" id="kpi-expenses">—</div>
+      <div class="kpi-sub" id="kpi-expenses-sub">Credit cards</div>
+    </div>
+    <div class="kpi-card purple">
+      <div class="kpi-label">Net Worth</div>
+      <div class="kpi-value" id="kpi-networth">—</div>
+      <div class="kpi-sub">Assets − Mortgage</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Daughter IVV Savings</div>
+      <div class="kpi-value" id="kpi-daughter">—</div>
+      <div class="kpi-sub" id="kpi-daughter-sub">Cumulative</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="flex-between mb-16">
+        <div>
+          <div class="card-title">Income vs Expenses</div>
+          <div class="card-subtitle">Last 12 months</div>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="overview-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="flex-between mb-16">
+        <div>
+          <div class="card-title">Net Worth Trend</div>
+          <div class="card-subtitle">Assets minus mortgage</div>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="networth-chart"></canvas></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/utils.js"></script>
+<script>
+(async () => {
+  const { year, month } = FF.currentYM();
+
+  // Load all data in parallel
+  const [summary, assetsHistory, mortgage, daughter] = await Promise.all([
+    FF.get('/api/transactions/summary'),
+    FF.get('/api/assets/history'),
+    FF.get('/api/mortgage'),
+    FF.get('/api/daughter')
+  ]);
+
+  // Current month KPIs
+  const curKey = `${year}-${String(month).padStart(2,'0')}`;
+  const cur = summary[curKey] || {};
+  const income = (cur.salary || 0) + (cur.other_income || 0);
+  const expenses = cur.expenses || 0;
+
+  document.getElementById('kpi-income').textContent = FF.ils(income);
+  document.getElementById('kpi-expenses').textContent = FF.ils(expenses);
+
+  // Latest total assets
+  const keys = Object.keys(assetsHistory).sort();
+  let latestAssets = 0;
+  if (keys.length) {
+    const latest = assetsHistory[keys[keys.length - 1]];
+    latestAssets = Object.values(latest).reduce((a, b) => a + b, 0);
+  }
+  document.getElementById('kpi-assets').textContent = FF.ils(latestAssets);
+
+  // Latest mortgage
+  let latestMortgage = 0;
+  if (mortgage.length) {
+    latestMortgage = mortgage[mortgage.length - 1].remaining_balance;
+  }
+  document.getElementById('kpi-mortgage').textContent = FF.ils(latestMortgage);
+
+  // Net worth
+  const networth = latestAssets - latestMortgage;
+  document.getElementById('kpi-networth').textContent = FF.ils(networth);
+
+  // Daughter savings
+  if (daughter.length) {
+    const last = daughter[daughter.length - 1];
+    document.getElementById('kpi-daughter').textContent = last.cumulative_shares.toFixed(4) + ' shares';
+    document.getElementById('kpi-daughter-sub').textContent = 'IVV';
+  }
+
+  // Income vs Expenses chart
+  const sortedKeys = Object.keys(summary).sort().slice(-12);
+  const labels = sortedKeys.map(k => { const [y,m] = k.split('-'); return FF.monthLabel(+y, +m); });
+  const incomeData = sortedKeys.map(k => (summary[k].salary||0) + (summary[k].other_income||0));
+  const expData = sortedKeys.map(k => summary[k].expenses||0);
+
+  const ctx1 = document.getElementById('overview-chart').getContext('2d');
+  new Chart(ctx1, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Income', data: incomeData, backgroundColor: 'rgba(76,175,136,0.7)', borderRadius: 4 },
+        { label: 'Expenses', data: expData, backgroundColor: 'rgba(224,92,106,0.7)', borderRadius: 4 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' } },
+      scales: { y: { ticks: { callback: v => '₪' + (v/1000).toFixed(0) + 'k' } } }
+    }
+  });
+
+  // Net worth chart
+  const assetKeys = Object.keys(assetsHistory).sort().slice(-12);
+  const networthData = assetKeys.map(k => {
+    const total = Object.values(assetsHistory[k]).reduce((a,b)=>a+b,0);
+    const mortEntry = mortgage.find(m => `${m.year}-${String(m.month).padStart(2,'0')}` === k);
+    const mort = mortEntry ? mortEntry.remaining_balance : latestMortgage;
+    return total - mort;
+  });
+
+  const ctx2 = document.getElementById('networth-chart').getContext('2d');
+  new Chart(ctx2, {
+    type: 'line',
+    data: {
+      labels: assetKeys.map(k => { const [y,m]=k.split('-'); return FF.monthLabel(+y,+m); }),
+      datasets: [{
+        label: 'Net Worth',
+        data: networthData,
+        borderColor: FF.colors.gold,
+        backgroundColor: FF.gradient(ctx2, FF.colors.gold),
+        tension: 0.4, fill: true, pointRadius: 3
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { ticks: { callback: v => '₪' + (v/1000).toFixed(0) + 'k' } } }
+    }
+  });
+})();
+</script>
+{% endblock %}

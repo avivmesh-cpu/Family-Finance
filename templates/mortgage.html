@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Mortgage{% endblock %}
+{% block page_title %}Mortgage Tracking{% endblock %}
+{% block page_subtitle %}Monthly remaining mortgage balance{% endblock %}
+
+{% block content %}
+<div class="page-body">
+  <div class="kpi-grid">
+    <div class="kpi-card red">
+      <div class="kpi-label">Current Balance</div>
+      <div class="kpi-value red" id="kpi-current">—</div>
+    </div>
+    <div class="kpi-card green">
+      <div class="kpi-label">Total Paid Down</div>
+      <div class="kpi-value green" id="kpi-paid">—</div>
+      <div class="kpi-sub">Since first entry</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Last Month Change</div>
+      <div class="kpi-value" id="kpi-change">—</div>
+    </div>
+    <div class="kpi-card blue">
+      <div class="kpi-label">Months Tracked</div>
+      <div class="kpi-value blue" id="kpi-months">0</div>
+    </div>
+  </div>
+
+  <div class="card mb-24">
+    <div class="card-title mb-16">Remaining Balance Over Time</div>
+    <div class="chart-wrap chart-wrap-tall"><canvas id="mortgage-chart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <div class="flex-between mb-16">
+      <div>
+        <div class="card-title">Add Monthly Entry</div>
+        <div class="card-subtitle">Enter the remaining balance for a month</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Month</label>
+        <input type="month" id="entry-month" class="form-input" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Remaining Balance (₪)</label>
+        <input type="number" id="entry-balance" class="form-input" placeholder="e.g. 850000" style="width:200px" />
+      </div>
+      <div class="form-group" style="justify-content:flex-end">
+        <label class="form-label">&nbsp;</label>
+        <button class="btn btn-primary" onclick="addEntry()">Save Entry</button>
+      </div>
+    </div>
+
+    <div class="section-divider">History</div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Month</th><th>Remaining Balance</th><th>Monthly Change</th><th></th></tr>
+        </thead>
+        <tbody id="mortgage-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/utils.js"></script>
+<script>
+let mortgageData = [];
+let mortChart = null;
+
+async function loadData() {
+  mortgageData = await FF.get('/api/mortgage');
+  renderTable();
+  updateKPIs();
+  renderChart();
+}
+
+function renderTable() {
+  const tbody = document.getElementById('mortgage-tbody');
+  tbody.innerHTML = '';
+  const sorted = [...mortgageData].sort((a,b) => b.year-a.year || b.month-a.month);
+  sorted.forEach((r, i) => {
+    const prev = sorted[i+1];
+    const change = prev ? prev.remaining_balance - r.remaining_balance : null;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${FF.monthLabel(r.year, r.month)}</td>
+      <td class="td-mono td-negative">${FF.ils(r.remaining_balance)}</td>
+      <td class="${change !== null ? (change > 0 ? 'td-positive' : 'td-negative') : ''} td-mono">
+        ${change !== null ? (change > 0 ? '↓ ' : '↑ ') + FF.ils(Math.abs(change)) : '—'}
+      </td>
+      <td class="text-right"><button class="btn btn-danger btn-icon" onclick="deleteEntry(${r.id})">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function updateKPIs() {
+  if (!mortgageData.length) return;
+  const sorted = [...mortgageData].sort((a,b) => a.year-b.year || a.month-b.month);
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const prev = sorted.length > 1 ? sorted[sorted.length - 2] : null;
+
+  document.getElementById('kpi-current').textContent = FF.ils(last.remaining_balance);
+  document.getElementById('kpi-paid').textContent = FF.ils(first.remaining_balance - last.remaining_balance);
+  document.getElementById('kpi-months').textContent = sorted.length;
+
+  if (prev) {
+    const change = prev.remaining_balance - last.remaining_balance;
+    const el = document.getElementById('kpi-change');
+    el.textContent = (change > 0 ? '↓ ' : '↑ ') + FF.ils(Math.abs(change));
+    el.className = 'kpi-value ' + (change > 0 ? 'green' : 'red');
+  }
+}
+
+function renderChart() {
+  const sorted = [...mortgageData].sort((a,b) => a.year-b.year || a.month-b.month);
+  const labels = sorted.map(r => FF.monthLabel(r.year, r.month));
+  const values = sorted.map(r => r.remaining_balance);
+  const ctx = document.getElementById('mortgage-chart').getContext('2d');
+  if (mortChart) mortChart.destroy();
+  mortChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Remaining Balance',
+        data: values,
+        borderColor: FF.colors.red,
+        backgroundColor: FF.gradient(ctx, FF.colors.red, 0.25, 0),
+        tension: 0.3, fill: true, pointRadius: 4, pointBackgroundColor: FF.colors.red
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { ticks: { callback: v => '₪' + (v/1000).toFixed(0) + 'k' }, reverse: false } }
+    }
+  });
+}
+
+async function addEntry() {
+  const monthVal = document.getElementById('entry-month').value;
+  const balance = document.getElementById('entry-balance').value;
+  if (!monthVal || !balance) { FF.toast('Please fill in all fields', 'error'); return; }
+  const [y, m] = monthVal.split('-');
+  try {
+    await FF.post('/api/mortgage', { year: +y, month: +m, remaining_balance: +balance });
+    await loadData();
+    FF.toast('Entry saved!');
+    document.getElementById('entry-balance').value = '';
+  } catch(e) { FF.toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteEntry(id) {
+  if (!confirm('Delete this entry?')) return;
+  await FF.del(`/api/mortgage/${id}`);
+  await loadData();
+  FF.toast('Deleted');
+}
+
+const { year, month } = FF.currentYM();
+document.getElementById('entry-month').value = `${year}-${String(month).padStart(2,'0')}`;
+loadData();
+</script>
+{% endblock %}

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Family Finance{% endblock %} — Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/css/main.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo-mark">₪</div>
+      <div>
+        <div class="logo-title">Family<br>Finance</div>
+        <div class="logo-sub">Dashboard</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="/" class="nav-item {% if request.path == '/' %}active{% endif %}">
+        <span class="nav-icon">◈</span> Overview
+      </a>
+      <a href="/income-spending" class="nav-item {% if '/income' in request.path %}active{% endif %}">
+        <span class="nav-icon">⇄</span> Income & Spending
+      </a>
+      <a href="/assets" class="nav-item {% if '/assets' in request.path %}active{% endif %}">
+        <span class="nav-icon">◎</span> Total Assets
+      </a>
+      <a href="/mortgage" class="nav-item {% if '/mortgage' in request.path %}active{% endif %}">
+        <span class="nav-icon">⌂</span> Mortgage
+      </a>
+      <a href="/stocks" class="nav-item {% if '/stocks' in request.path %}active{% endif %}">
+        <span class="nav-icon">▲</span> Stock Portfolio
+      </a>
+      <a href="/daughter-savings" class="nav-item {% if '/daughter' in request.path %}active{% endif %}">
+        <span class="nav-icon">✦</span> Daughter Savings
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="update-badge" style="margin-bottom:10px">Data entry: 15th of month</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <a href="/api/export" class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" title="Download JSON backup">⬇ Backup</a>
+        <button class="btn btn-ghost btn-sm" style="flex:1" onclick="document.getElementById('import-input').click()" title="Restore from backup">⬆ Import</button>
+      </div>
+      <input type="file" id="import-input" accept=".json" style="display:none" onchange="importBackup(this)" />
+      <a href="/logout" class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;margin-top:6px;display:flex">Sign out</a>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">{% block page_title %}Dashboard{% endblock %}</h1>
+        <p class="page-subtitle">{% block page_subtitle %}{% endblock %}</p>
+      </div>
+      <div class="header-date">
+        <span id="current-date"></span>
+      </div>
+    </header>
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <script>
+    document.getElementById('current-date').textContent = new Date().toLocaleDateString('en-IL', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+
+    async function importBackup(input) {
+      const file = input.files[0];
+      if (!file) return;
+      if (!confirm(`Import "${file.name}"? This will merge data (existing records are kept).`)) return;
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const r = await fetch('/api/import', { method: 'POST', body: form });
+        const data = await r.json();
+        if (data.status === 'ok') {
+          const counts = Object.entries(data.imported).map(([k,v]) => `${v} ${k}`).join(', ');
+          alert(`Import successful!\nImported: ${counts}\n\nPage will reload.`);
+          location.reload();
+        } else {
+          alert('Import error: ' + (data.error || 'Unknown'));
+        }
+      } catch(e) {
+        alert('Import failed: ' + e.message);
+      }
+      input.value = '';
+    }
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}Stock Portfolio{% endblock %}
+{% block page_title %}Stock Portfolio{% endblock %}
+{% block page_subtitle %}Holdings, current value, and profit/loss{% endblock %}
+
+{% block content %}
+<div class="page-body">
+  <div class="kpi-grid">
+    <div class="kpi-card green">
+      <div class="kpi-label">Portfolio Value</div>
+      <div class="kpi-value green" id="kpi-value">—</div>
+      <div class="kpi-sub">At current prices</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Cost Basis</div>
+      <div class="kpi-value" id="kpi-cost">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Total P&L</div>
+      <div class="kpi-value" id="kpi-pnl">—</div>
+    </div>
+    <div class="kpi-card blue">
+      <div class="kpi-label">P&L %</div>
+      <div class="kpi-value blue" id="kpi-pnl-pct">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Holdings</div>
+      <div class="kpi-value" id="kpi-count">0</div>
+      <div class="kpi-sub">Positions</div>
+    </div>
+  </div>
+
+  <div class="grid-2 mb-24">
+    <div class="card">
+      <div class="card-title mb-16">Portfolio Allocation</div>
+      <div class="chart-wrap"><canvas id="allocation-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title mb-16">P&L per Position</div>
+      <div class="chart-wrap"><canvas id="pnl-chart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="flex-between mb-16">
+      <div>
+        <div class="card-title">Holdings</div>
+        <div class="card-subtitle">Edit positions directly in the table</div>
+      </div>
+      <div class="flex gap-8">
+        <button class="btn btn-ghost btn-sm" onclick="refreshPrices()">↻ Refresh Prices</button>
+        <button class="btn btn-primary btn-sm" onclick="addStock()">+ Add Position</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Qty</th>
+            <th>Avg Cost ($)</th>
+            <th>Current Price ($)</th>
+            <th>Cost Basis ($)</th>
+            <th>Current Value ($)</th>
+            <th>P&L ($)</th>
+            <th>P&L %</th>
+            <th>Notes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="stocks-tbody"></tbody>
+      </table>
+    </div>
+    <div class="mt-8" style="font-size:12px;color:var(--text3)">
+      * Prices fetched live from Yahoo Finance. Click ↻ to update.
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/utils.js"></script>
+<script>
+let holdings = [], prices = {};
+let allocChart = null, pnlChart = null;
+
+async function loadData() {
+  holdings = await FF.get('/api/stocks');
+  await refreshPrices(false);
+}
+
+async function refreshPrices(notify = true) {
+  try {
+    prices = await FF.get('/api/stocks/prices');
+    renderTable();
+    updateKPIs();
+    renderCharts();
+    if (notify) FF.toast('Prices updated');
+  } catch(e) {
+    if (notify) FF.toast('Price fetch error: ' + e.message, 'error');
+    renderTable();
+    updateKPIs();
+  }
+}
+
+function renderTable() {
+  const tbody = document.getElementById('stocks-tbody');
+  tbody.innerHTML = '';
+  if (!holdings.length) {
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><div class="empty-state-icon">▲</div><p>No holdings yet</p></div></td></tr>`;
+    return;
+  }
+  holdings.forEach(h => {
+    const curPrice = prices[h.symbol];
+    const costBasis = h.quantity * h.purchase_price;
+    const curValue = curPrice ? h.quantity * curPrice : null;
+    const pnl = curValue !== null ? curValue - costBasis : null;
+    const pnlPct = pnl !== null ? (pnl / costBasis) * 100 : null;
+    const tr = document.createElement('tr');
+    tr.dataset.id = h.id;
+    tr.innerHTML = `
+      <td><input class="editable-cell mono" value="${h.symbol}" data-field="symbol" style="width:80px;font-weight:600" /></td>
+      <td><input class="editable-cell mono" type="number" value="${h.quantity}" data-field="quantity" style="width:80px" /></td>
+      <td><input class="editable-cell mono" type="number" value="${h.purchase_price}" data-field="purchase_price" style="width:90px" /></td>
+      <td class="td-mono">${curPrice ? '$' + FF.dec(curPrice) : '<span style="color:var(--text3)">—</span>'}</td>
+      <td class="td-mono">$${FF.dec(costBasis)}</td>
+      <td class="td-mono ${curValue ? '' : ''}">${curValue ? '$' + FF.dec(curValue) : '—'}</td>
+      <td class="td-mono ${pnl === null ? '' : pnl >= 0 ? 'td-positive' : 'td-negative'}">${pnl !== null ? (pnl>=0?'+':'')+' $'+FF.dec(pnl) : '—'}</td>
+      <td class="${pnlPct === null ? '' : pnlPct >= 0 ? 'td-positive' : 'td-negative'} td-mono">${pnlPct !== null ? (pnlPct>=0?'+':'')+FF.dec(pnlPct)+'%' : '—'}</td>
+      <td><input class="editable-cell" value="${h.notes||''}" data-field="notes" placeholder="notes..." /></td>
+      <td class="text-right"><button class="btn btn-danger btn-icon" onclick="deleteStock(${h.id})">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+
+    // Save on blur
+    tr.querySelectorAll('[data-field]').forEach(inp => {
+      inp.addEventListener('blur', () => saveStock(h.id, tr));
+    });
+  });
+}
+
+async function saveStock(id, tr) {
+  const data = {
+    symbol: tr.querySelector('[data-field=symbol]').value,
+    quantity: +tr.querySelector('[data-field=quantity]').value,
+    purchase_price: +tr.querySelector('[data-field=purchase_price]').value,
+    notes: tr.querySelector('[data-field=notes]').value
+  };
+  try {
+    await FF.put(`/api/stocks/${id}`, data);
+    const idx = holdings.findIndex(h => h.id === id);
+    if (idx !== -1) holdings[idx] = { ...holdings[idx], ...data };
+    updateKPIs(); renderCharts();
+  } catch(e) { FF.toast('Save failed', 'error'); }
+}
+
+function updateKPIs() {
+  let totalCost = 0, totalValue = 0;
+  holdings.forEach(h => {
+    totalCost += h.quantity * h.purchase_price;
+    const p = prices[h.symbol];
+    if (p) totalValue += h.quantity * p;
+  });
+  const pnl = totalValue - totalCost;
+  const pnlPct = totalCost ? (pnl / totalCost) * 100 : 0;
+  document.getElementById('kpi-value').textContent = totalValue ? '$' + FF.dec(totalValue) : '—';
+  document.getElementById('kpi-cost').textContent = '$' + FF.dec(totalCost);
+  document.getElementById('kpi-count').textContent = holdings.length;
+  const pnlEl = document.getElementById('kpi-pnl');
+  pnlEl.textContent = totalValue ? (pnl>=0?'+':'')+' $'+FF.dec(pnl) : '—';
+  pnlEl.className = 'kpi-value ' + (pnl >= 0 ? 'green' : 'red');
+  const pctEl = document.getElementById('kpi-pnl-pct');
+  pctEl.textContent = totalValue ? (pnlPct>=0?'+':'')+FF.dec(pnlPct)+'%' : '—';
+  pctEl.className = 'kpi-value ' + (pnlPct >= 0 ? 'green' : 'red');
+}
+
+function renderCharts() {
+  const symbols = holdings.map(h => h.symbol);
+  const values = holdings.map(h => prices[h.symbol] ? h.quantity * prices[h.symbol] : h.quantity * h.purchase_price);
+  const colors = [FF.colors.gold, FF.colors.blue, FF.colors.green, FF.colors.purple, FF.colors.teal, FF.colors.red];
+
+  const ctx1 = document.getElementById('allocation-chart').getContext('2d');
+  if (allocChart) allocChart.destroy();
+  allocChart = new Chart(ctx1, {
+    type: 'doughnut',
+    data: {
+      labels: symbols,
+      datasets: [{ data: values, backgroundColor: colors.slice(0, symbols.length), borderWidth: 2, borderColor: '#1f2434' }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+  });
+
+  const pnlData = holdings.map(h => {
+    const p = prices[h.symbol];
+    if (!p) return 0;
+    return (h.quantity * p) - (h.quantity * h.purchase_price);
+  });
+  const ctx2 = document.getElementById('pnl-chart').getContext('2d');
+  if (pnlChart) pnlChart.destroy();
+  pnlChart = new Chart(ctx2, {
+    type: 'bar',
+    data: {
+      labels: symbols,
+      datasets: [{
+        label: 'P&L ($)',
+        data: pnlData,
+        backgroundColor: pnlData.map(v => v >= 0 ? 'rgba(76,175,136,0.7)' : 'rgba(224,92,106,0.7)'),
+        borderRadius: 4
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { ticks: { callback: v => '$' + v.toFixed(0) } } }
+    }
+  });
+}
+
+async function addStock() {
+  try {
+    await FF.post('/api/stocks', { symbol: 'NEW', quantity: 0, purchase_price: 0 });
+    holdings = await FF.get('/api/stocks');
+    renderTable();
+  } catch(e) { FF.toast('Error', 'error'); }
+}
+
+async function deleteStock(id) {
+  if (!confirm('Remove this position?')) return;
+  await FF.del(`/api/stocks/${id}`);
+  holdings = holdings.filter(h => h.id !== id);
+  renderTable(); updateKPIs(); renderCharts();
+  FF.toast('Position removed');
+}
+
+loadData();
+</script>
+{% endblock %}

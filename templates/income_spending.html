@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block title %}Income & Spending{% endblock %}
+{% block page_title %}Income & Spending{% endblock %}
+{% block page_subtitle %}Monthly income and expense tracking{% endblock %}
+
+{% block content %}
+<div class="page-body">
+
+  <div class="month-bar">
+    <label>Month:</label>
+    <input type="month" id="month-picker" class="month-input" />
+    <button class="btn btn-primary btn-sm" id="load-btn">Load</button>
+    <div class="spacer"></div>
+  </div>
+
+  <div class="kpi-grid" id="monthly-kpis">
+    <div class="kpi-card green">
+      <div class="kpi-label">Total Income</div>
+      <div class="kpi-value green" id="kpi-total-income">₪0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Salaries</div>
+      <div class="kpi-value" id="kpi-salary">₪0</div>
+    </div>
+    <div class="kpi-card blue">
+      <div class="kpi-label">Other Income</div>
+      <div class="kpi-value blue" id="kpi-other-income">₪0</div>
+    </div>
+    <div class="kpi-card red">
+      <div class="kpi-label">Total Expenses</div>
+      <div class="kpi-value red" id="kpi-total-expenses">₪0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Net Savings</div>
+      <div class="kpi-value" id="kpi-savings">₪0</div>
+    </div>
+  </div>
+
+  <div class="grid-2 mb-24">
+    <div class="card">
+      <div class="card-title mb-16">Monthly Breakdown</div>
+      <div class="chart-wrap"><canvas id="breakdown-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title mb-16">12-Month Trend</div>
+      <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- INCOME TABLE -->
+  <div class="card mb-24">
+    <div class="flex-between mb-16">
+      <div>
+        <div class="card-title">Income</div>
+        <div class="card-subtitle">Salaries and other income sources</div>
+      </div>
+      <div class="flex gap-8">
+        <button class="btn btn-ghost btn-sm" onclick="addRow('income_salary')">+ Salary</button>
+        <button class="btn btn-ghost btn-sm" onclick="addRow('income_other')">+ Other</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="income-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Amount (₪)</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="income-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- EXPENSES TABLE -->
+  <div class="card">
+    <div class="flex-between mb-16">
+      <div>
+        <div class="card-title">Expenses</div>
+        <div class="card-subtitle">Credit card transactions and other expenses</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="addRow('expense')">+ Add Expense</button>
+    </div>
+    <div class="table-wrap">
+      <table id="expense-table">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th>Amount (₪)</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="expense-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/utils.js"></script>
+<script>
+let currentYear, currentMonth, allTransactions = [], trendChart = null, breakChart = null;
+
+function getYM() {
+  const val = document.getElementById('month-picker').value;
+  const [y, m] = val.split('-');
+  return { year: +y, month: +m };
+}
+
+async function loadData() {
+  const { year, month } = getYM();
+  currentYear = year; currentMonth = month;
+  allTransactions = await FF.get(`/api/transactions?year=${year}&month=${month}`);
+  renderTables();
+  updateKPIs();
+  await loadTrendChart();
+  renderBreakdownChart();
+}
+
+function renderTables() {
+  const income = allTransactions.filter(t => t.type.startsWith('income'));
+  const expenses = allTransactions.filter(t => t.type === 'expense');
+  renderIncome(income);
+  renderExpenses(expenses);
+}
+
+function renderIncome(rows) {
+  const tbody = document.getElementById('income-tbody');
+  tbody.innerHTML = '';
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-state-icon">⇄</div><p>No income entries yet</p></div></td></tr>`;
+    return;
+  }
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.dataset.id = r.id;
+    tr.innerHTML = `
+      <td>
+        <select class="editable-cell form-select" onchange="updateField(${r.id},'type',this.value)">
+          <option value="income_salary" ${r.type==='income_salary'?'selected':''}>Salary</option>
+          <option value="income_other" ${r.type==='income_other'?'selected':''}>Other</option>
+        </select>
+      </td>
+      <td><input class="editable-cell" value="${r.description}" onblur="updateField(${r.id},'description',this.value)" /></td>
+      <td><input class="editable-cell mono" type="number" value="${r.amount}" onblur="updateField(${r.id},'amount',this.value)" /></td>
+      <td class="text-right"><button class="btn btn-danger btn-icon" onclick="deleteRow(${r.id})">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderExpenses(rows) {
+  const tbody = document.getElementById('expense-tbody');
+  tbody.innerHTML = '';
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="3"><div class="empty-state"><div class="empty-state-icon">◎</div><p>No expenses yet</p></div></td></tr>`;
+    return;
+  }
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.dataset.id = r.id;
+    tr.innerHTML = `
+      <td><input class="editable-cell" value="${r.description}" onblur="updateField(${r.id},'description',this.value)" /></td>
+      <td><input class="editable-cell mono" type="number" value="${r.amount}" onblur="updateField(${r.id},'amount',this.value)" /></td>
+      <td class="text-right"><button class="btn btn-danger btn-icon" onclick="deleteRow(${r.id})">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function updateKPIs() {
+  const salary = allTransactions.filter(t=>t.type==='income_salary').reduce((s,r)=>s+r.amount,0);
+  const other = allTransactions.filter(t=>t.type==='income_other').reduce((s,r)=>s+r.amount,0);
+  const expenses = allTransactions.filter(t=>t.type==='expense').reduce((s,r)=>s+r.amount,0);
+  const income = salary + other;
+  const savings = income - expenses;
+  document.getElementById('kpi-total-income').textContent = FF.ils(income);
+  document.getElementById('kpi-salary').textContent = FF.ils(salary);
+  document.getElementById('kpi-other-income').textContent = FF.ils(other);
+  document.getElementById('kpi-total-expenses').textContent = FF.ils(expenses);
+  const el = document.getElementById('kpi-savings');
+  el.textContent = FF.ils(savings);
+  el.className = 'kpi-value ' + (savings >= 0 ? 'green' : 'red');
+}
+
+async function addRow(type) {
+  try {
+    await FF.post('/api/transactions', {
+      year: currentYear, month: currentMonth, type,
+      description: type === 'expense' ? 'New expense' : type === 'income_salary' ? 'Salary' : 'Other income',
+      amount: 0
+    });
+    await loadData();
+    FF.toast('Row added');
+  } catch(e) { FF.toast('Error: ' + e.message, 'error'); }
+}
+
+async function updateField(id, field, value) {
+  try {
+    await FF.put(`/api/transactions/${id}`, { [field]: value });
+    allTransactions = allTransactions.map(t => t.id === id ? {...t, [field]: field==='amount'?+value:value} : t);
+    updateKPIs();
+    renderBreakdownChart();
+  } catch(e) { FF.toast('Save failed', 'error'); }
+}
+
+async function deleteRow(id) {
+  if (!confirm('Delete this entry?')) return;
+  try {
+    await FF.del(`/api/transactions/${id}`);
+    allTransactions = allTransactions.filter(t => t.id !== id);
+    renderTables(); updateKPIs(); renderBreakdownChart();
+    FF.toast('Deleted');
+  } catch(e) { FF.toast('Error', 'error'); }
+}
+
+function renderBreakdownChart() {
+  const salary = allTransactions.filter(t=>t.type==='income_salary').reduce((s,r)=>s+r.amount,0);
+  const other = allTransactions.filter(t=>t.type==='income_other').reduce((s,r)=>s+r.amount,0);
+  const expenses = allTransactions.filter(t=>t.type==='expense').reduce((s,r)=>s+r.amount,0);
+  const ctx = document.getElementById('breakdown-chart').getContext('2d');
+  if (breakChart) breakChart.destroy();
+  breakChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Salaries', 'Other Income', 'Expenses'],
+      datasets: [{
+        data: [salary, other, expenses],
+        backgroundColor: [FF.colors.green, FF.colors.blue, FF.colors.red],
+        borderWidth: 2, borderColor: '#1f2434'
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+}
+
+async function loadTrendChart() {
+  const summary = await FF.get('/api/transactions/summary');
+  const keys = Object.keys(summary).sort().slice(-12);
+  const labels = keys.map(k => { const [y,m]=k.split('-'); return FF.monthLabel(+y,+m); });
+  const incomeData = keys.map(k => (summary[k].salary||0) + (summary[k].other_income||0));
+  const expData = keys.map(k => summary[k].expenses||0);
+  const ctx = document.getElementById('trend-chart').getContext('2d');
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Income', data: incomeData, borderColor: FF.colors.green, tension: 0.4, fill: false, pointRadius: 3 },
+        { label: 'Expenses', data: expData, borderColor: FF.colors.red, tension: 0.4, fill: false, pointRadius: 3 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top' } },
+      scales: { y: { ticks: { callback: v => '₪' + (v/1000).toFixed(0) + 'k' } } }
+    }
+  });
+}
+
+// Init
+const { year, month } = FF.currentYM();
+document.getElementById('month-picker').value = `${year}-${String(month).padStart(2,'0')}`;
+document.getElementById('load-btn').addEventListener('click', loadData);
+loadData();
+</script>
+{% endblock %}

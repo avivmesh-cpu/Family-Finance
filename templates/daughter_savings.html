@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+{% block title %}Daughter Savings{% endblock %}
+{% block page_title %}Daughter Savings — IVV{% endblock %}
+{% block page_subtitle %}Monthly ₪300 investment in IVV ETF{% endblock %}
+
+{% block content %}
+<div class="page-body">
+  <div class="kpi-grid">
+    <div class="kpi-card green">
+      <div class="kpi-label">Total Shares</div>
+      <div class="kpi-value green" id="kpi-shares">—</div>
+      <div class="kpi-sub">IVV accumulated</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Current Value</div>
+      <div class="kpi-value" id="kpi-cur-value">—</div>
+      <div class="kpi-sub">At live IVV price</div>
+    </div>
+    <div class="kpi-card blue">
+      <div class="kpi-label">Total Invested</div>
+      <div class="kpi-value blue" id="kpi-invested">—</div>
+      <div class="kpi-sub">₪ invested</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Gain</div>
+      <div class="kpi-value" id="kpi-gain">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Months Investing</div>
+      <div class="kpi-value" id="kpi-months">0</div>
+    </div>
+  </div>
+
+  <div class="grid-2 mb-24">
+    <div class="card">
+      <div class="card-title mb-16">Cumulative IVV Shares</div>
+      <div class="chart-wrap"><canvas id="shares-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title mb-16">Portfolio Value (USD)</div>
+      <div class="chart-wrap"><canvas id="value-chart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="flex-between mb-16">
+      <div>
+        <div class="card-title">Add Monthly Investment</div>
+        <div class="card-subtitle">Enter the IVV price and exchange rate for the 15th of the month</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="fetchLivePrices()">↻ Fetch Live Prices</button>
+    </div>
+
+    <div class="form-row" style="align-items:flex-end">
+      <div class="form-group">
+        <label class="form-label">Month</label>
+        <input type="month" id="entry-month" class="form-input" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">ILS to Invest</label>
+        <input type="number" id="entry-ils" class="form-input" value="300" style="width:120px" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">IVV Price (USD)</label>
+        <input type="number" id="entry-ivv" class="form-input" step="0.01" placeholder="e.g. 545.20" style="width:150px" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">USD/ILS Rate</label>
+        <input type="number" id="entry-rate" class="form-input" step="0.001" placeholder="e.g. 3.72" style="width:130px" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Shares to Buy</label>
+        <div class="form-input text-mono" id="preview-shares" style="width:130px;color:var(--accent);background:var(--bg3)">—</div>
+      </div>
+      <button class="btn btn-primary" onclick="addEntry()">Save Investment</button>
+    </div>
+
+    <div class="section-divider">Investment History</div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th>ILS Invested</th>
+            <th>USD/ILS Rate</th>
+            <th>USD Amount</th>
+            <th>IVV Price</th>
+            <th>Shares Bought</th>
+            <th>Cumulative Shares</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="daughter-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/utils.js"></script>
+<script>
+let entries = [];
+let sharesChart = null, valueChart = null;
+let liveIVV = null;
+
+// Preview shares calculation
+['entry-ils','entry-ivv','entry-rate'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updatePreview);
+});
+function updatePreview() {
+  const ils = +document.getElementById('entry-ils').value;
+  const ivv = +document.getElementById('entry-ivv').value;
+  const rate = +document.getElementById('entry-rate').value;
+  if (ils && ivv && rate) {
+    const shares = (ils / rate) / ivv;
+    document.getElementById('preview-shares').textContent = shares.toFixed(6);
+  } else {
+    document.getElementById('preview-shares').textContent = '—';
+  }
+}
+
+async function loadData() {
+  entries = await FF.get('/api/daughter');
+  // Fetch live IVV price for valuation
+  try {
+    const live = await FF.get('/api/daughter/fetch-prices');
+    liveIVV = live.ivv_price;
+  } catch(e) {}
+  renderTable();
+  updateKPIs();
+  renderCharts();
+}
+
+function renderTable() {
+  const tbody = document.getElementById('daughter-tbody');
+  tbody.innerHTML = '';
+  const sorted = [...entries].sort((a,b) => b.year-a.year || b.month-a.month);
+  if (!sorted.length) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><div class="empty-state-icon">✦</div><p>No investments yet. Start with the form above!</p></div></td></tr>`;
+    return;
+  }
+  sorted.forEach(r => {
+    const usdAmt = r.ils_invested / r.usd_ils_rate;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${FF.monthLabel(r.year, r.month)}</td>
+      <td class="td-mono">${FF.ils(r.ils_invested)}</td>
+      <td class="td-mono">${FF.dec(r.usd_ils_rate, 3)}</td>
+      <td class="td-mono">$${FF.dec(usdAmt)}</td>
+      <td class="td-mono">$${FF.dec(r.ivv_price_usd)}</td>
+      <td class="td-mono td-positive">+${r.shares_purchased.toFixed(6)}</td>
+      <td class="td-mono">${r.cumulative_shares.toFixed(6)}</td>
+      <td class="text-right"><button class="btn btn-danger btn-icon" onclick="deleteEntry(${r.id})">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function updateKPIs() {
+  if (!entries.length) return;
+  const sorted = [...entries].sort((a,b) => a.year-b.year || a.month-b.month);
+  const last = sorted[sorted.length - 1];
+  const totalILS = sorted.reduce((s,r) => s + r.ils_invested, 0);
+  const curValue = liveIVV ? last.cumulative_shares * liveIVV : null;
+  const totalUSDInvested = sorted.reduce((s,r) => s + (r.ils_invested / r.usd_ils_rate), 0);
+  const gain = curValue ? curValue - totalUSDInvested : null;
+
+  document.getElementById('kpi-shares').textContent = last.cumulative_shares.toFixed(6);
+  document.getElementById('kpi-cur-value').textContent = curValue ? '$' + FF.dec(curValue) : '—';
+  document.getElementById('kpi-invested').textContent = FF.ils(totalILS);
+  document.getElementById('kpi-months').textContent = sorted.length;
+
+  if (gain !== null) {
+    const gainEl = document.getElementById('kpi-gain');
+    gainEl.textContent = (gain >= 0 ? '+' : '') + '$' + FF.dec(gain);
+    gainEl.className = 'kpi-value ' + (gain >= 0 ? 'green' : 'red');
+  }
+}
+
+function renderCharts() {
+  const sorted = [...entries].sort((a,b) => a.year-b.year || a.month-b.month);
+  const labels = sorted.map(r => FF.monthLabel(r.year, r.month));
+  const cumShares = sorted.map(r => r.cumulative_shares);
+  const cumValues = sorted.map(r => r.cumulative_shares * r.ivv_price_usd);
+
+  const ctx1 = document.getElementById('shares-chart').getContext('2d');
+  if (sharesChart) sharesChart.destroy();
+  sharesChart = new Chart(ctx1, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'IVV Shares',
+        data: cumShares,
+        borderColor: FF.colors.gold,
+        backgroundColor: FF.gradient(ctx1, FF.colors.gold),
+        tension: 0.4, fill: true, pointRadius: 3
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { ticks: { callback: v => v.toFixed(3) + ' sh' } } }
+    }
+  });
+
+  const ctx2 = document.getElementById('value-chart').getContext('2d');
+  if (valueChart) valueChart.destroy();
+  valueChart = new Chart(ctx2, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Portfolio Value ($)',
+        data: cumValues,
+        borderColor: FF.colors.green,
+        backgroundColor: FF.gradient(ctx2, FF.colors.green),
+        tension: 0.4, fill: true, pointRadius: 3
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { ticks: { callback: v => '$' + v.toFixed(0) } } }
+    }
+  });
+}
+
+async function fetchLivePrices() {
+  try {
+    FF.toast('Fetching live prices...');
+    const data = await FF.get('/api/daughter/fetch-prices');
+    if (data.ivv_price) document.getElementById('entry-ivv').value = data.ivv_price.toFixed(2);
+    if (data.usd_ils_rate) document.getElementById('entry-rate').value = data.usd_ils_rate.toFixed(3);
+    updatePreview();
+    FF.toast(`IVV: $${data.ivv_price?.toFixed(2)} | Rate: ${data.usd_ils_rate?.toFixed(3)}`);
+  } catch(e) { FF.toast('Could not fetch prices', 'error'); }
+}
+
+async function addEntry() {
+  const monthVal = document.getElementById('entry-month').value;
+  const ils = +document.getElementById('entry-ils').value;
+  const ivv = +document.getElementById('entry-ivv').value;
+  const rate = +document.getElementById('entry-rate').value;
+  if (!monthVal || !ils || !ivv || !rate) { FF.toast('Please fill in all fields', 'error'); return; }
+  const [y, m] = monthVal.split('-');
+  try {
+    await FF.post('/api/daughter', { year: +y, month: +m, ils_invested: ils, ivv_price_usd: ivv, usd_ils_rate: rate });
+    await loadData();
+    FF.toast('Investment saved!');
+  } catch(e) { FF.toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteEntry(id) {
+  if (!confirm('Delete this entry? Cumulative shares will be recalculated.')) return;
+  await FF.del(`/api/daughter/${id}`);
+  await loadData();
+  FF.toast('Entry deleted and shares recalculated');
+}
+
+const { year, month } = FF.currentYM();
+document.getElementById('entry-month').value = `${year}-${String(month).padStart(2,'0')}`;
+loadData();
+</script>
+{% endblock %}
