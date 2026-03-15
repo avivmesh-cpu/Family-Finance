@@ -11,12 +11,16 @@ DB_DIR = '/data' if os.path.isdir('/data') else os.path.join(os.path.dirname(__f
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, 'family_finance.db')
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DB_PATH}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-prod')
 DASHBOARD_PASSWORD = os.environ.get('DASHBOARD_PASSWORD', '')  # empty = no password
 db = SQLAlchemy(app)
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'ok'})
 
 # ──────────────────────────────────────────────
 # AUTH (optional password protection)
