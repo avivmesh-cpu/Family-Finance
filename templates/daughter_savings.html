@@ -133,23 +133,27 @@ function updatePreview() {
 async function autoFetchPrices() {
   document.getElementById('ivv-loader').style.display = 'inline';
   document.getElementById('rate-loader').style.display = 'inline';
+  document.getElementById('entry-ivv').value = '';
+  document.getElementById('entry-rate').value = '';
   document.getElementById('entry-ivv').placeholder = 'fetching...';
   document.getElementById('entry-rate').placeholder = 'fetching...';
   try {
     const data = await FF.get('/api/daughter/fetch-prices');
     if (data.ivv_price) {
-      document.getElementById('entry-ivv').value = data.ivv_price.toFixed(2);
+      document.getElementById('entry-ivv').value = Number(data.ivv_price).toFixed(2);
+      document.getElementById('entry-ivv').placeholder = '';
     } else {
       document.getElementById('entry-ivv').placeholder = 'enter manually';
       FF.toast('IVV price unavailable — enter manually', 'error');
     }
     if (data.usd_ils_rate) {
-      document.getElementById('entry-rate').value = data.usd_ils_rate.toFixed(3);
+      document.getElementById('entry-rate').value = Number(data.usd_ils_rate).toFixed(3);
+      document.getElementById('entry-rate').placeholder = '';
     } else {
       document.getElementById('entry-rate').placeholder = 'enter manually';
     }
     if (data.ivv_price && data.usd_ils_rate) {
-      FF.toast('IVV $' + data.ivv_price.toFixed(2) + ' | Rate ' + data.usd_ils_rate.toFixed(3));
+      FF.toast('IVV $' + Number(data.ivv_price).toFixed(2) + ' | Rate ' + Number(data.usd_ils_rate).toFixed(3));
     }
     updatePreview();
   } catch(e) {
@@ -161,13 +165,15 @@ async function autoFetchPrices() {
 
 async function loadData() {
   entries = await FF.get('/api/daughter');
-  try {
-    const live = await FF.get('/api/daughter/fetch-prices');
-    liveIVV = live.ivv_price;
-  } catch(e) {}
   renderTable();
   updateKPIs();
   renderCharts();
+  // Fetch live IVV price separately just for KPI display (don't touch the input fields)
+  try {
+    const live = await FF.get('/api/daughter/fetch-prices');
+    liveIVV = live.ivv_price;
+    updateKPIs();
+  } catch(e) {}
 }
 
 function renderTable() {
@@ -263,12 +269,12 @@ async function deleteEntry(id) {
   FF.toast('Deleted');
 }
 
-// Set default month and auto-fetch on load
+// Set default month
 const {year, month} = FF.currentYM();
 const defaultMonth = `${year}-${String(month).padStart(2,'0')}`;
 document.getElementById('entry-month').value = defaultMonth;
-loadData();
-// Auto-fetch prices for current month on page load
-autoFetchPrices();
+
+// Load history first, then fetch live prices for the input fields
+loadData().then(() => autoFetchPrices());
 </script>
 {% endblock %}
