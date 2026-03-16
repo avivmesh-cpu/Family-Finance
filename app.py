@@ -335,13 +335,43 @@ def add_daughter_entry():
 @auth_required
 def fetch_ivv_prices():
     result = {}
-    for symbol, key in [('IVV','ivv_price'), ('USDILS=X','usd_ils_rate')]:
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+    }
+
+    # Fetch IVV price — try v8 chart API, fallback to v7 quote API
+    try:
+        url = 'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d'
+        resp = requests.get(url, timeout=8, headers=headers)
+        data = resp.json()
+        meta = data['chart']['result'][0]['meta']
+        price = meta.get('regularMarketPrice') or meta.get('previousClose')
+        result['ivv_price'] = price
+    except Exception:
         try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1d"
-            resp = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
-            result[key] = resp.json()['chart']['result'][0]['meta']['regularMarketPrice']
-        except Exception:
-            result[key] = None
+            # Fallback: v7 quote summary
+            url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=IVV'
+            resp = requests.get(url, timeout=8, headers=headers)
+            data = resp.json()
+            price = data['quoteResponse']['result'][0]['regularMarketPrice']
+            result['ivv_price'] = price
+        except Exception as e2:
+            result['ivv_price'] = None
+            result['ivv_error'] = str(e2)
+
+    # Fetch USD/ILS rate
+    try:
+        url = 'https://query1.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&range=5d'
+        resp = requests.get(url, timeout=8, headers=headers)
+        data = resp.json()
+        meta = data['chart']['result'][0]['meta']
+        rate = meta.get('regularMarketPrice') or meta.get('previousClose')
+        result['usd_ils_rate'] = rate
+    except Exception as e:
+        result['usd_ils_rate'] = None
+        result['rate_error'] = str(e)
+
     return jsonify(result)
 
 @app.route('/api/daughter/<int:did>', methods=['DELETE'])
