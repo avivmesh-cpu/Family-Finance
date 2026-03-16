@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Income & Spending{% endblock %}
 {% block page_title %}Income & Spending{% endblock %}
-{% block page_subtitle %}Monthly income and expense tracking{% endblock %}
+{% block page_subtitle %}Monthly income and categorized expense tracking{% endblock %}
 
 {% block content %}
 <div class="page-body">
@@ -13,33 +13,35 @@
     <div class="spacer"></div>
   </div>
 
+  <!-- KPI SUMMARY -->
   <div class="kpi-grid" id="monthly-kpis">
     <div class="kpi-card green">
       <div class="kpi-label">Total Income</div>
-      <div class="kpi-value green" id="kpi-total-income">₪0</div>
+      <div class="kpi-value green" id="kpi-total-income">&#8362;0</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Salaries</div>
-      <div class="kpi-value" id="kpi-salary">₪0</div>
+      <div class="kpi-value" id="kpi-salary">&#8362;0</div>
     </div>
     <div class="kpi-card blue">
       <div class="kpi-label">Other Income</div>
-      <div class="kpi-value blue" id="kpi-other-income">₪0</div>
+      <div class="kpi-value blue" id="kpi-other-income">&#8362;0</div>
     </div>
     <div class="kpi-card red">
       <div class="kpi-label">Total Expenses</div>
-      <div class="kpi-value red" id="kpi-total-expenses">₪0</div>
+      <div class="kpi-value red" id="kpi-total-expenses">&#8362;0</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Net Savings</div>
-      <div class="kpi-value" id="kpi-savings">₪0</div>
+      <div class="kpi-value" id="kpi-savings">&#8362;0</div>
     </div>
   </div>
 
+  <!-- CHARTS -->
   <div class="grid-2 mb-24">
     <div class="card">
-      <div class="card-title mb-16">Monthly Breakdown</div>
-      <div class="chart-wrap"><canvas id="breakdown-chart"></canvas></div>
+      <div class="card-title mb-16">Spending by Category</div>
+      <div class="chart-wrap"><canvas id="category-chart"></canvas></div>
     </div>
     <div class="card">
       <div class="card-title mb-16">12-Month Trend</div>
@@ -52,7 +54,7 @@
     <div class="flex-between mb-16">
       <div>
         <div class="card-title">Income</div>
-        <div class="card-subtitle">Salaries and other income sources</div>
+        <div class="card-subtitle">Salaries and other income</div>
       </div>
       <div class="flex gap-8">
         <button class="btn btn-ghost btn-sm" onclick="addRow('income_salary')">+ Salary</button>
@@ -60,115 +62,166 @@
       </div>
     </div>
     <div class="table-wrap">
-      <table id="income-table">
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Description</th>
-            <th>Amount (₪)</th>
-            <th></th>
-          </tr>
-        </thead>
+      <table>
+        <thead><tr><th>Type</th><th>Description</th><th style="text-align:right">Amount (&#8362;)</th><th></th></tr></thead>
         <tbody id="income-tbody"></tbody>
+        <tfoot><tr>
+          <td colspan="2" style="font-size:12px;color:var(--text3);padding:10px 14px">Total Income</td>
+          <td style="text-align:right;font-family:'DM Mono',monospace;font-weight:500;color:var(--green);padding:10px 14px" id="income-total">&#8362;0</td>
+          <td></td>
+        </tr></tfoot>
       </table>
     </div>
   </div>
 
-  <!-- EXPENSES TABLE -->
+  <!-- EXPENSES TABLE — grouped by category -->
   <div class="card">
     <div class="flex-between mb-16">
       <div>
         <div class="card-title">Expenses</div>
-        <div class="card-subtitle">Credit card transactions and other expenses</div>
+        <div class="card-subtitle">Grouped by category — click category header to add a row</div>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="addRow('expense')">+ Add Expense</button>
+      <div class="flex gap-8">
+        <select id="new-cat-select" class="form-input form-select" style="width:180px">
+          <option value="">-- choose category --</option>
+          <option value="Housing">Housing</option>
+          <option value="Food">Food</option>
+          <option value="Transport">Transport</option>
+          <option value="Health">Health</option>
+          <option value="Education">Education</option>
+          <option value="Utilities">Utilities</option>
+          <option value="Insurance">Insurance</option>
+          <option value="Children">Children</option>
+          <option value="Entertainment">Entertainment</option>
+          <option value="Clothing">Clothing</option>
+          <option value="Other">Other</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="addExpenseRow()">+ Add Row</button>
+      </div>
     </div>
-    <div class="table-wrap">
-      <table id="expense-table">
-        <thead>
-          <tr>
-            <th>Description</th>
-            <th>Amount (₪)</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="expense-tbody"></tbody>
-      </table>
+    <div id="expense-tables"></div>
+    <div style="display:flex;justify-content:flex-end;padding:12px 14px;border-top:1px solid var(--border2);margin-top:8px">
+      <span style="font-size:13px;color:var(--text3);margin-right:24px">Total Expenses</span>
+      <span style="font-family:'DM Mono',monospace;font-weight:500;color:var(--red)" id="expense-total">&#8362;0</span>
     </div>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-
 <script>
-let currentYear, currentMonth, allTransactions = [], trendChart = null, breakChart = null;
+let currentYear, currentMonth, allTransactions = [];
+let trendChart = null, catChart = null;
+
+const CAT_COLORS = {
+  Housing:'#5b8df6', Food:'#4caf88', Transport:'#c9a84c', Health:'#e05c6a',
+  Education:'#9b7cf8', Utilities:'#4cc9c9', Insurance:'#f08c4b',
+  Children:'#e87dbd', Entertainment:'#7dc8e8', Clothing:'#a8d86e', Other:'#9aa0bb'
+};
 
 function getYM() {
-  const val = document.getElementById('month-picker').value;
-  const [y, m] = val.split('-');
-  return { year: +y, month: +m };
+  const [y,m] = document.getElementById('month-picker').value.split('-');
+  return {year:+y, month:+m};
 }
 
 async function loadData() {
-  const { year, month } = getYM();
+  const {year, month} = getYM();
   currentYear = year; currentMonth = month;
   allTransactions = await FF.get(`/api/transactions?year=${year}&month=${month}`);
-  renderTables();
+  renderIncome();
+  renderExpenses();
   updateKPIs();
+  renderCategoryChart();
   await loadTrendChart();
-  renderBreakdownChart();
 }
 
-function renderTables() {
-  const income = allTransactions.filter(t => t.type.startsWith('income'));
-  const expenses = allTransactions.filter(t => t.type === 'expense');
-  renderIncome(income);
-  renderExpenses(expenses);
-}
-
-function renderIncome(rows) {
+function renderIncome() {
+  const rows = allTransactions.filter(t => t.type.startsWith('income'));
   const tbody = document.getElementById('income-tbody');
   tbody.innerHTML = '';
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-state-icon">⇄</div><p>No income entries yet</p></div></td></tr>`;
+    tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><div class="empty-state-icon">--</div><p>No income entries yet</p></div></td></tr>';
     return;
   }
   rows.forEach(r => {
     const tr = document.createElement('tr');
     tr.dataset.id = r.id;
     tr.innerHTML = `
-      <td>
-        <select class="editable-cell form-select" onchange="updateField(${r.id},'type',this.value)">
-          <option value="income_salary" ${r.type==='income_salary'?'selected':''}>Salary</option>
-          <option value="income_other" ${r.type==='income_other'?'selected':''}>Other</option>
-        </select>
-      </td>
-      <td><input class="editable-cell" value="${r.description}" onblur="updateField(${r.id},'description',this.value)" /></td>
-      <td><input class="editable-cell mono" type="number" value="${r.amount}" onblur="updateField(${r.id},'amount',this.value)" /></td>
-      <td class="text-right"><button class="btn btn-danger btn-icon" onclick="deleteRow(${r.id})">✕</button></td>
-    `;
+      <td><select class="editable-cell form-select" style="width:110px" onchange="updateField(${r.id},'type',this.value)">
+        <option value="income_salary" ${r.type==='income_salary'?'selected':''}>Salary</option>
+        <option value="income_other" ${r.type==='income_other'?'selected':''}>Other</option>
+      </select></td>
+      <td><input class="editable-cell" value="${escHtml(r.description)}" onblur="updateField(${r.id},'description',this.value)" /></td>
+      <td style="text-align:right"><input class="editable-cell mono" type="number" value="${r.amount}" style="text-align:right;width:120px" onblur="updateField(${r.id},'amount',this.value)" /></td>
+      <td style="width:40px;text-align:right"><button class="btn btn-danger btn-icon" onclick="deleteRow(${r.id})">&#x2715;</button></td>`;
     tbody.appendChild(tr);
   });
+  const total = rows.reduce((s,r)=>s+r.amount,0);
+  document.getElementById('income-total').textContent = FF.ils(total);
 }
 
-function renderExpenses(rows) {
-  const tbody = document.getElementById('expense-tbody');
-  tbody.innerHTML = '';
-  if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="3"><div class="empty-state"><div class="empty-state-icon">◎</div><p>No expenses yet</p></div></td></tr>`;
+function renderExpenses() {
+  const expenses = allTransactions.filter(t => t.type === 'expense');
+  // Group by category (stored in description as "Category: Item" or just description)
+  const groups = {};
+  expenses.forEach(r => {
+    const cat = r.category || extractCategory(r.description);
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(r);
+  });
+  const container = document.getElementById('expense-tables');
+  container.innerHTML = '';
+  const allCats = Object.keys(groups).sort();
+  if (!allCats.length) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">--</div><p>No expenses yet. Select a category and click + Add Row.</p></div>';
     return;
   }
-  rows.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.dataset.id = r.id;
-    tr.innerHTML = `
-      <td><input class="editable-cell" value="${r.description}" onblur="updateField(${r.id},'description',this.value)" /></td>
-      <td><input class="editable-cell mono" type="number" value="${r.amount}" onblur="updateField(${r.id},'amount',this.value)" /></td>
-      <td class="text-right"><button class="btn btn-danger btn-icon" onclick="deleteRow(${r.id})">✕</button></td>
-    `;
-    tbody.appendChild(tr);
+  allCats.forEach(cat => {
+    const rows = groups[cat];
+    const catTotal = rows.reduce((s,r)=>s+r.amount,0);
+    const color = CAT_COLORS[cat] || '#9aa0bb';
+    const section = document.createElement('div');
+    section.style.cssText = 'margin-bottom:4px';
+    section.innerHTML = `
+      <div style="display:flex;align-items:center;padding:8px 14px;background:var(--bg3);border-top:2px solid ${color};cursor:pointer"
+           onclick="addExpenseRowWithCat('${cat}')">
+        <span style="width:10px;height:10px;border-radius:2px;background:${color};display:inline-block;margin-right:10px;flex-shrink:0"></span>
+        <span style="font-size:12px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;flex:1">${cat}</span>
+        <span style="font-size:11px;color:var(--text3);margin-right:12px">click to add row</span>
+        <span style="font-family:'DM Mono',monospace;font-size:13px;color:${color}">${FF.ils(catTotal)}</span>
+      </div>
+      <table style="width:100%">
+        <tbody class="cat-tbody" data-cat="${cat}">
+          ${rows.map(r => expenseRowHtml(r)).join('')}
+        </tbody>
+      </table>`;
+    container.appendChild(section);
   });
+  updateExpenseTotal();
+}
+
+function expenseRowHtml(r) {
+  return `<tr data-id="${r.id}">
+    <td style="padding-left:34px"><input class="editable-cell" value="${escHtml(r.description)}" onblur="updateField(${r.id},'description',this.value)" placeholder="Description..." /></td>
+    <td style="text-align:right;width:160px"><input class="editable-cell mono" type="number" value="${r.amount}" style="text-align:right;width:130px" onblur="updateField(${r.id},'amount',this.value)" /></td>
+    <td style="width:40px;text-align:right"><button class="btn btn-danger btn-icon" onclick="deleteRow(${r.id})">&#x2715;</button></td>
+  </tr>`;
+}
+
+function extractCategory(description) {
+  // Try to match "Category: desc" pattern
+  const match = description.match(/^\[([^\]]+)\]/);
+  if (match) return match[1];
+  return 'Other';
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function updateExpenseTotal() {
+  const total = allTransactions.filter(t=>t.type==='expense').reduce((s,r)=>s+r.amount,0);
+  document.getElementById('expense-total').textContent = FF.ils(total);
 }
 
 function updateKPIs() {
@@ -190,83 +243,102 @@ async function addRow(type) {
   try {
     await FF.post('/api/transactions', {
       year: currentYear, month: currentMonth, type,
-      description: type === 'expense' ? 'New expense' : type === 'income_salary' ? 'Salary' : 'Other income',
-      amount: 0
+      description: type==='income_salary' ? 'Salary' : 'Other income', amount: 0
     });
     await loadData();
-    FF.toast('Row added');
-  } catch(e) { FF.toast('Error: ' + e.message, 'error'); }
+  } catch(e) { FF.toast('Error: '+e.message,'error'); }
+}
+
+function addExpenseRow() {
+  const cat = document.getElementById('new-cat-select').value;
+  if (!cat) { FF.toast('Please select a category first','error'); return; }
+  addExpenseRowWithCat(cat);
+}
+
+async function addExpenseRowWithCat(cat) {
+  try {
+    await FF.post('/api/transactions', {
+      year: currentYear, month: currentMonth, type: 'expense',
+      description: `[${cat}] `, amount: 0
+    });
+    await loadData();
+    // Focus last input in that category
+    setTimeout(() => {
+      const tbodies = document.querySelectorAll(`.cat-tbody[data-cat="${cat}"]`);
+      if (tbodies.length) {
+        const inputs = tbodies[tbodies.length-1].querySelectorAll('input');
+        if (inputs.length) inputs[0].focus();
+      }
+    }, 100);
+  } catch(e) { FF.toast('Error: '+e.message,'error'); }
 }
 
 async function updateField(id, field, value) {
   try {
-    await FF.put(`/api/transactions/${id}`, { [field]: value });
-    allTransactions = allTransactions.map(t => t.id === id ? {...t, [field]: field==='amount'?+value:value} : t);
+    await FF.put(`/api/transactions/${id}`, {[field]: value});
+    allTransactions = allTransactions.map(t => t.id===id ? {...t,[field]:field==='amount'?+value:value} : t);
     updateKPIs();
-    renderBreakdownChart();
-  } catch(e) { FF.toast('Save failed', 'error'); }
+    updateExpenseTotal();
+    renderCategoryChart();
+  } catch(e) { FF.toast('Save failed','error'); }
 }
 
 async function deleteRow(id) {
   if (!confirm('Delete this entry?')) return;
   try {
     await FF.del(`/api/transactions/${id}`);
-    allTransactions = allTransactions.filter(t => t.id !== id);
-    renderTables(); updateKPIs(); renderBreakdownChart();
+    allTransactions = allTransactions.filter(t=>t.id!==id);
+    renderIncome(); renderExpenses(); updateKPIs(); renderCategoryChart();
     FF.toast('Deleted');
-  } catch(e) { FF.toast('Error', 'error'); }
+  } catch(e) { FF.toast('Error','error'); }
 }
 
-function renderBreakdownChart() {
-  const salary = allTransactions.filter(t=>t.type==='income_salary').reduce((s,r)=>s+r.amount,0);
-  const other = allTransactions.filter(t=>t.type==='income_other').reduce((s,r)=>s+r.amount,0);
-  const expenses = allTransactions.filter(t=>t.type==='expense').reduce((s,r)=>s+r.amount,0);
-  const ctx = document.getElementById('breakdown-chart').getContext('2d');
-  if (breakChart) breakChart.destroy();
-  breakChart = new Chart(ctx, {
+function renderCategoryChart() {
+  const expenses = allTransactions.filter(t=>t.type==='expense');
+  const groups = {};
+  expenses.forEach(r => {
+    const cat = extractCategory(r.description);
+    groups[cat] = (groups[cat]||0) + r.amount;
+  });
+  const cats = Object.keys(groups).sort();
+  const ctx = document.getElementById('category-chart').getContext('2d');
+  if (catChart) catChart.destroy();
+  catChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels: ['Salaries', 'Other Income', 'Expenses'],
-      datasets: [{
-        data: [salary, other, expenses],
-        backgroundColor: [FF.colors.green, FF.colors.blue, FF.colors.red],
-        borderWidth: 2, borderColor: '#1f2434'
+      labels: cats,
+      datasets:[{
+        data: cats.map(c=>groups[c]),
+        backgroundColor: cats.map(c=>CAT_COLORS[c]||'#9aa0bb'),
+        borderWidth:2, borderColor:'#1f2434'
       }]
     },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom' } }
-    }
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:11},boxWidth:12}}}}
   });
 }
 
 async function loadTrendChart() {
   const summary = await FF.get('/api/transactions/summary');
   const keys = Object.keys(summary).sort().slice(-12);
-  const labels = keys.map(k => { const [y,m]=k.split('-'); return FF.monthLabel(+y,+m); });
-  const incomeData = keys.map(k => (summary[k].salary||0) + (summary[k].other_income||0));
-  const expData = keys.map(k => summary[k].expenses||0);
   const ctx = document.getElementById('trend-chart').getContext('2d');
   if (trendChart) trendChart.destroy();
   trendChart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels,
-      datasets: [
-        { label: 'Income', data: incomeData, borderColor: FF.colors.green, tension: 0.4, fill: false, pointRadius: 3 },
-        { label: 'Expenses', data: expData, borderColor: FF.colors.red, tension: 0.4, fill: false, pointRadius: 3 }
+      labels: keys.map(k=>{const[y,m]=k.split('-');return FF.monthLabel(+y,+m);}),
+      datasets:[
+        {label:'Income', data:keys.map(k=>(summary[k].salary||0)+(summary[k].other_income||0)),
+         borderColor:FF.colors.green, tension:0.4, fill:false, pointRadius:3},
+        {label:'Expenses', data:keys.map(k=>summary[k].expenses||0),
+         borderColor:FF.colors.red, tension:0.4, fill:false, pointRadius:3}
       ]
     },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'top' } },
-      scales: { y: { ticks: { callback: v => '₪' + (v/1000).toFixed(0) + 'k' } } }
-    }
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top'}},
+      scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(0)+'k'}}}}
   });
 }
 
-// Init
-const { year, month } = FF.currentYM();
+const {year, month} = FF.currentYM();
 document.getElementById('month-picker').value = `${year}-${String(month).padStart(2,'0')}`;
 document.getElementById('load-btn').addEventListener('click', loadData);
 loadData();

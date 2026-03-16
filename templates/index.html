@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="page-body">
-  <div class="kpi-grid" id="overview-kpis">
+  <div class="kpi-grid">
     <div class="kpi-card green">
       <div class="kpi-label">Total Assets</div>
       <div class="kpi-value green" id="kpi-assets">—</div>
@@ -19,148 +19,172 @@
     <div class="kpi-card">
       <div class="kpi-label">This Month Income</div>
       <div class="kpi-value" id="kpi-income">—</div>
-      <div class="kpi-sub" id="kpi-income-sub">Salaries + other</div>
+      <div class="kpi-sub">Salaries + other</div>
     </div>
     <div class="kpi-card blue">
       <div class="kpi-label">This Month Expenses</div>
       <div class="kpi-value blue" id="kpi-expenses">—</div>
-      <div class="kpi-sub" id="kpi-expenses-sub">Credit cards</div>
+      <div class="kpi-sub">Credit cards</div>
     </div>
     <div class="kpi-card purple">
       <div class="kpi-label">Net Worth</div>
       <div class="kpi-value" id="kpi-networth">—</div>
-      <div class="kpi-sub">Assets − Mortgage</div>
+      <div class="kpi-sub">Bank + Stocks - Mortgage</div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">Daughter IVV Savings</div>
+      <div class="kpi-label">Romi IVV Savings</div>
       <div class="kpi-value" id="kpi-daughter">—</div>
-      <div class="kpi-sub" id="kpi-daughter-sub">Cumulative</div>
+      <div class="kpi-sub">Cumulative shares</div>
+    </div>
+  </div>
+
+  <div class="grid-2 mb-24">
+    <div class="card">
+      <div class="card-title mb-16">Income vs Expenses</div>
+      <div class="card-subtitle mb-16">Last 12 months</div>
+      <div class="chart-wrap"><canvas id="overview-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title mb-16">Asset Allocation</div>
+      <div class="card-subtitle mb-16">Latest month breakdown</div>
+      <div class="chart-wrap"><canvas id="assets-pie-chart"></canvas></div>
     </div>
   </div>
 
   <div class="grid-2">
     <div class="card">
-      <div class="flex-between mb-16">
-        <div>
-          <div class="card-title">Income vs Expenses</div>
-          <div class="card-subtitle">Last 12 months</div>
-        </div>
-      </div>
-      <div class="chart-wrap"><canvas id="overview-chart"></canvas></div>
+      <div class="card-title mb-16">Net Worth Trend</div>
+      <div class="card-subtitle mb-16">Bank + Stocks minus mortgage</div>
+      <div class="chart-wrap"><canvas id="networth-chart"></canvas></div>
     </div>
     <div class="card">
-      <div class="flex-between mb-16">
-        <div>
-          <div class="card-title">Net Worth Trend</div>
-          <div class="card-subtitle">Assets minus mortgage</div>
-        </div>
-      </div>
-      <div class="chart-wrap"><canvas id="networth-chart"></canvas></div>
+      <div class="card-title mb-16">Mortgage Remaining</div>
+      <div class="card-subtitle mb-16">Balance over time</div>
+      <div class="chart-wrap"><canvas id="mortgage-chart"></canvas></div>
     </div>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-
 <script>
 (async () => {
   const { year, month } = FF.currentYM();
 
-  // Load all data in parallel
-  const [summary, assetsHistory, mortgage, daughter] = await Promise.all([
+  const [summary, assetsHistory, mortgageData, daughter] = await Promise.all([
     FF.get('/api/transactions/summary'),
     FF.get('/api/assets/history'),
     FF.get('/api/mortgage'),
     FF.get('/api/daughter')
   ]);
 
-  // Current month KPIs
+  // ── KPIs ──
   const curKey = `${year}-${String(month).padStart(2,'0')}`;
   const cur = summary[curKey] || {};
-  const income = (cur.salary || 0) + (cur.other_income || 0);
-  const expenses = cur.expenses || 0;
+  document.getElementById('kpi-income').textContent = FF.ils((cur.salary||0)+(cur.other_income||0));
+  document.getElementById('kpi-expenses').textContent = FF.ils(cur.expenses||0);
 
-  document.getElementById('kpi-income').textContent = FF.ils(income);
-  document.getElementById('kpi-expenses').textContent = FF.ils(expenses);
-
-  // Latest total assets
-  const keys = Object.keys(assetsHistory).sort();
-  let latestAssets = 0;
-  if (keys.length) {
-    const latest = assetsHistory[keys[keys.length - 1]];
-    latestAssets = Object.values(latest).reduce((a, b) => a + b, 0);
+  const assetKeys = Object.keys(assetsHistory).sort();
+  let latestAssets = 0, latestBank = 0, latestStocks = 0;
+  let latestAllAccounts = {};
+  if (assetKeys.length) {
+    latestAllAccounts = assetsHistory[assetKeys[assetKeys.length-1]];
+    latestAssets = Object.values(latestAllAccounts).reduce((a,b)=>a+b,0);
   }
   document.getElementById('kpi-assets').textContent = FF.ils(latestAssets);
 
-  // Latest mortgage
   let latestMortgage = 0;
-  if (mortgage.length) {
-    latestMortgage = mortgage[mortgage.length - 1].remaining_balance;
-  }
+  if (mortgageData.length) latestMortgage = mortgageData[mortgageData.length-1].remaining_balance;
   document.getElementById('kpi-mortgage').textContent = FF.ils(latestMortgage);
 
-  // Net worth
-  const networth = latestAssets - latestMortgage;
+  // Net worth = only bank + stocks accounts minus mortgage
+  // We need to fetch full asset data to separate by type
+  const allAssets = await FF.get('/api/assets');
+  const latestMonthKey = assetKeys.length ? assetKeys[assetKeys.length-1] : null;
+  if (latestMonthKey) {
+    const [ly, lm] = latestMonthKey.split('-');
+    const latestMonthAssets = allAssets.filter(a => a.year===+ly && a.month===+lm);
+    latestBank = latestMonthAssets.filter(a=>a.account_type==='bank').reduce((s,a)=>s+a.balance,0);
+    latestStocks = latestMonthAssets.filter(a=>a.account_type==='stocks').reduce((s,a)=>s+a.balance,0);
+  }
+  const networth = latestBank + latestStocks - latestMortgage;
   document.getElementById('kpi-networth').textContent = FF.ils(networth);
 
-  // Daughter savings
   if (daughter.length) {
-    const last = daughter[daughter.length - 1];
-    document.getElementById('kpi-daughter').textContent = last.cumulative_shares.toFixed(4) + ' shares';
-    document.getElementById('kpi-daughter-sub').textContent = 'IVV';
+    const last = daughter[daughter.length-1];
+    document.getElementById('kpi-daughter').textContent = last.cumulative_shares.toFixed(4) + ' sh';
   }
 
-  // Income vs Expenses chart
-  const sortedKeys = Object.keys(summary).sort().slice(-12);
-  const labels = sortedKeys.map(k => { const [y,m] = k.split('-'); return FF.monthLabel(+y, +m); });
-  const incomeData = sortedKeys.map(k => (summary[k].salary||0) + (summary[k].other_income||0));
-  const expData = sortedKeys.map(k => summary[k].expenses||0);
-
+  // ── Chart 1: Income vs Expenses bar ──
+  const summaryKeys = Object.keys(summary).sort().slice(-12);
   const ctx1 = document.getElementById('overview-chart').getContext('2d');
   new Chart(ctx1, {
     type: 'bar',
     data: {
-      labels,
+      labels: summaryKeys.map(k=>{const[y,m]=k.split('-');return FF.monthLabel(+y,+m);}),
       datasets: [
-        { label: 'Income', data: incomeData, backgroundColor: 'rgba(76,175,136,0.7)', borderRadius: 4 },
-        { label: 'Expenses', data: expData, backgroundColor: 'rgba(224,92,106,0.7)', borderRadius: 4 }
+        {label:'Income', data:summaryKeys.map(k=>(summary[k].salary||0)+(summary[k].other_income||0)), backgroundColor:'rgba(76,175,136,0.75)', borderRadius:4},
+        {label:'Expenses', data:summaryKeys.map(k=>summary[k].expenses||0), backgroundColor:'rgba(224,92,106,0.75)', borderRadius:4}
       ]
     },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'top' } },
-      scales: { y: { ticks: { callback: v => '₪' + (v/1000).toFixed(0) + 'k' } } }
-    }
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top'}},
+      scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(0)+'k'}}}}
   });
 
-  // Net worth chart
-  const assetKeys = Object.keys(assetsHistory).sort().slice(-12);
-  const networthData = assetKeys.map(k => {
-    const total = Object.values(assetsHistory[k]).reduce((a,b)=>a+b,0);
-    const mortEntry = mortgage.find(m => `${m.year}-${String(m.month).padStart(2,'0')}` === k);
-    const mort = mortEntry ? mortEntry.remaining_balance : latestMortgage;
-    return total - mort;
+  // ── Chart 2: Asset allocation pie ──
+  const typeLabels = {bank:'Bank',stocks:'Stocks',education:'Education Fund',other:'Other'};
+  const typeColors = [FF.colors.blue, FF.colors.gold, FF.colors.purple, FF.colors.teal];
+  const typeKeys = ['bank','stocks','education','other'];
+  const typeTotals = typeKeys.map(type => {
+    if (!latestMonthKey) return 0;
+    const [ly,lm] = latestMonthKey.split('-');
+    return allAssets.filter(a=>a.year===+ly&&a.month===+lm&&a.account_type===type).reduce((s,a)=>s+a.balance,0);
   });
-
-  const ctx2 = document.getElementById('networth-chart').getContext('2d');
+  const ctx2 = document.getElementById('assets-pie-chart').getContext('2d');
   new Chart(ctx2, {
+    type: 'doughnut',
+    data: {
+      labels: typeKeys.map(k=>typeLabels[k]),
+      datasets:[{data:typeTotals, backgroundColor:typeColors, borderWidth:2, borderColor:'#1f2434'}]
+    },
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}
+  });
+
+  // ── Chart 3: Net Worth trend (bank+stocks-mortgage) ──
+  const ctx3 = document.getElementById('networth-chart').getContext('2d');
+  const nwData = assetKeys.slice(-18).map(k => {
+    const [ky,km] = k.split('-');
+    const monthAssets = allAssets.filter(a=>a.year===+ky&&a.month===+km);
+    const bankVal = monthAssets.filter(a=>a.account_type==='bank').reduce((s,a)=>s+a.balance,0);
+    const stockVal = monthAssets.filter(a=>a.account_type==='stocks').reduce((s,a)=>s+a.balance,0);
+    const mortEntry = mortgageData.find(m=>`${m.year}-${String(m.month).padStart(2,'0')}`===k);
+    const mort = mortEntry ? mortEntry.remaining_balance : latestMortgage;
+    return bankVal + stockVal - mort;
+  });
+  new Chart(ctx3, {
     type: 'line',
     data: {
-      labels: assetKeys.map(k => { const [y,m]=k.split('-'); return FF.monthLabel(+y,+m); }),
-      datasets: [{
-        label: 'Net Worth',
-        data: networthData,
-        borderColor: FF.colors.gold,
-        backgroundColor: FF.gradient(ctx2, FF.colors.gold),
-        tension: 0.4, fill: true, pointRadius: 3
-      }]
+      labels: assetKeys.slice(-18).map(k=>{const[y,m]=k.split('-');return FF.monthLabel(+y,+m);}),
+      datasets:[{label:'Net Worth', data:nwData, borderColor:FF.colors.gold,
+        backgroundColor:FF.gradient(ctx3,FF.colors.gold), tension:0.4, fill:true, pointRadius:3}]
     },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { y: { ticks: { callback: v => '₪' + (v/1000).toFixed(0) + 'k' } } }
-    }
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(0)+'k'}}}}
+  });
+
+  // ── Chart 4: Mortgage over time ──
+  const sortedMort = [...mortgageData].sort((a,b)=>a.year-b.year||a.month-b.month);
+  const ctx4 = document.getElementById('mortgage-chart').getContext('2d');
+  new Chart(ctx4, {
+    type: 'line',
+    data: {
+      labels: sortedMort.map(r=>FF.monthLabel(r.year,r.month)),
+      datasets:[{label:'Remaining', data:sortedMort.map(r=>r.remaining_balance),
+        borderColor:FF.colors.red, backgroundColor:FF.gradient(ctx4,FF.colors.red,0.2,0),
+        tension:0.3, fill:true, pointRadius:3}]
+    },
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(0)+'k'}}}}
   });
 })();
 </script>
