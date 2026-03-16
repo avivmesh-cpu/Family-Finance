@@ -496,23 +496,20 @@ def import_data():
 @app.route('/api/debug-prices', methods=['GET'])
 @auth_required
 def debug_prices():
-    """Debug endpoint - shows raw response from Yahoo for IVV"""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://finance.yahoo.com',
     }
     results = {}
-    for label, url in [
-        ('yahoo_v8_q1', 'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d'),
-        ('yahoo_v8_q2', 'https://query2.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d'),
-        ('yahoo_v7',    'https://query2.finance.yahoo.com/v7/finance/quote?symbols=IVV'),
-        ('er_api',      'https://open.er-api.com/v6/latest/USD'),
-    ]:
-        try:
-            resp = requests.get(url, timeout=8, headers=headers)
-            results[label] = {'status': resp.status_code, 'snippet': resp.text[:300]}
-        except Exception as e:
-            results[label] = {'error': str(e)}
+    try:
+        resp = requests.get('https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d', timeout=8, headers=headers)
+        data = resp.json()
+        meta = data['chart']['result'][0]['meta']
+        # Show ALL meta keys so we can see what price fields exist
+        results['ivv_meta_keys'] = {k: v for k, v in meta.items() if 'rice' in k.lower() or 'close' in k.lower() or 'price' in k.lower()}
+        results['ivv_meta_full'] = meta
+    except Exception as e:
+        results['ivv_error'] = str(e)
     return jsonify(results)
 
 
