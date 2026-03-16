@@ -336,42 +336,92 @@ def add_daughter_entry():
 def fetch_ivv_prices():
     result = {}
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://finance.yahoo.com',
     }
 
-    # Fetch IVV price — try v8 chart API, fallback to v7 quote API
-    try:
-        url = 'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d'
-        resp = requests.get(url, timeout=8, headers=headers)
-        data = resp.json()
-        meta = data['chart']['result'][0]['meta']
-        price = meta.get('regularMarketPrice') or meta.get('previousClose')
-        result['ivv_price'] = price
-    except Exception:
+    # ── IVV Price ── try 3 different Yahoo endpoints
+    ivv_price = None
+    errors = []
+
+    # Method 1: Yahoo v8 chart with longer range
+    for range_val in ['5d', '1mo']:
         try:
-            # Fallback: v7 quote summary
-            url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=IVV'
+            url = f'https://query2.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range={range_val}'
             resp = requests.get(url, timeout=8, headers=headers)
             data = resp.json()
-            price = data['quoteResponse']['result'][0]['regularMarketPrice']
-            result['ivv_price'] = price
-        except Exception as e2:
-            result['ivv_price'] = None
-            result['ivv_error'] = str(e2)
+            meta = data['chart']['result'][0]['meta']
+            ivv_price = meta.get('regularMarketPrice') or meta.get('previousClose') or meta.get('chartPreviousClose')
+            if ivv_price:
+                break
+        except Exception as e:
+            errors.append(f'v8/{range_val}: {e}')
 
-    # Fetch USD/ILS rate
-    try:
-        url = 'https://query1.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&range=5d'
-        resp = requests.get(url, timeout=8, headers=headers)
-        data = resp.json()
-        meta = data['chart']['result'][0]['meta']
-        rate = meta.get('regularMarketPrice') or meta.get('previousClose')
-        result['usd_ils_rate'] = rate
-    except Exception as e:
-        result['usd_ils_rate'] = None
-        result['rate_error'] = str(e)
+    # Method 2: Yahoo v7 quote
+    if not ivv_price:
+        try:
+            url = 'https://query2.finance.yahoo.com/v7/finance/quote?symbols=IVV&fields=regularMarketPrice,previousClose'
+            resp = requests.get(url, timeout=8, headers=headers)
+            data = resp.json()
+            r0 = data['quoteResponse']['result'][0]
+            ivv_price = r0.get('regularMarketPrice') or r0.get('previousClose')
+        except Exception as e:
+            errors.append(f'v7: {e}')
 
+    # Method 3: Yahoo v10 quoteSummary
+    if not ivv_price:
+        try:
+            url = 'https://query2.finance.yahoo.com/v10/finance/quoteSummary/IVV?modules=price'
+            resp = requests.get(url, timeout=8, headers=headers)
+            data = resp.json()
+            price_data = data['quoteSummary']['result'][0]['price']
+            ivv_price = price_data['regularMarketPrice']['raw']
+        except Exception as e:
+            errors.append(f'v10: {e}')
+
+    result['ivv_price'] = ivv_price
+    if not ivv_price:
+        result['ivv_error'] = ' | '.join(errors)
+
+    # ── USD/ILS Rate ── try Yahoo then fallback to open exchange rate API
+    ils_rate = None
+
+    # Method 1: Yahoo for USDILS=X
+    for sym in ['USDILS=X', 'ILS=X']:
+        try:
+            url = f'https://query2.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d'
+            resp = requests.get(url, timeout=8, headers=headers)
+            data = resp.json()
+            meta = data['chart']['result'][0]['meta']
+            ils_rate = meta.get('regularMarketPrice') or meta.get('previousClose')
+            if ils_rate:
+                break
+        except Exception as e:
+            pass
+
+    # Method 2: Free exchange rate API (no key needed)
+    if not ils_rate:
+        try:
+            url = 'https://open.er-api.com/v6/latest/USD'
+            resp = requests.get(url, timeout=8)
+            data = resp.json()
+            ils_rate = data['rates'].get('ILS')
+        except Exception as e:
+            pass
+
+    # Method 3: Another free source
+    if not ils_rate:
+        try:
+            url = 'https://api.exchangerate-api.com/v4/latest/USD'
+            resp = requests.get(url, timeout=8)
+            data = resp.json()
+            ils_rate = data['rates'].get('ILS')
+        except Exception as e:
+            pass
+
+    result['usd_ils_rate'] = ils_rate
     return jsonify(result)
 
 @app.route('/api/daughter/<int:did>', methods=['DELETE'])
@@ -442,6 +492,30 @@ def import_data():
                          (row['year'],row['month'],row['ils_invested'],row['usd_ils_rate'],row['ivv_price_usd'],row['shares_purchased'],row['cumulative_shares']))
         counts['daughter'] = len(data.get('daughter',[]))
     return jsonify({'status': 'ok', 'imported': counts})
+
+@app.route('/api/debug-prices', methods=['GET'])
+@auth_required
+def debug_prices():
+    """Debug endpoint - shows raw response from Yahoo for IVV"""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://finance.yahoo.com',
+    }
+    results = {}
+    for label, url in [
+        ('yahoo_v8_q1', 'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d'),
+        ('yahoo_v8_q2', 'https://query2.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d'),
+        ('yahoo_v7',    'https://query2.finance.yahoo.com/v7/finance/quote?symbols=IVV'),
+        ('er_api',      'https://open.er-api.com/v6/latest/USD'),
+    ]:
+        try:
+            resp = requests.get(url, timeout=8, headers=headers)
+            results[label] = {'status': resp.status_code, 'snippet': resp.text[:300]}
+        except Exception as e:
+            results[label] = {'error': str(e)}
+    return jsonify(results)
+
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
