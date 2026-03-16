@@ -139,19 +139,24 @@ async function autoFetchPrices() {
     const data = await FF.get('/api/daughter/fetch-prices');
     if (data.ivv_price) {
       document.getElementById('entry-ivv').value = data.ivv_price.toFixed(2);
+    } else {
+      document.getElementById('entry-ivv').placeholder = 'enter manually';
+      FF.toast('IVV price unavailable — enter manually', 'error');
     }
     if (data.usd_ils_rate) {
       document.getElementById('entry-rate').value = data.usd_ils_rate.toFixed(3);
+    } else {
+      document.getElementById('entry-rate').placeholder = 'enter manually';
+    }
+    if (data.ivv_price && data.usd_ils_rate) {
+      FF.toast('IVV $' + data.ivv_price.toFixed(2) + ' | Rate ' + data.usd_ils_rate.toFixed(3));
     }
     updatePreview();
-    FF.toast('Prices fetched: IVV $' + (data.ivv_price||'?').toFixed(2) + ' | Rate ' + (data.usd_ils_rate||'?').toFixed(3));
   } catch(e) {
-    FF.toast('Could not fetch live prices — enter manually','error');
+    FF.toast('Could not fetch prices — enter manually', 'error');
   }
   document.getElementById('ivv-loader').style.display = 'none';
   document.getElementById('rate-loader').style.display = 'none';
-  document.getElementById('entry-ivv').placeholder = '';
-  document.getElementById('entry-rate').placeholder = '';
 }
 
 async function loadData() {
