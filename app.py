@@ -337,91 +337,55 @@ def fetch_ivv_prices():
     result = {}
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
         'Referer': 'https://finance.yahoo.com',
     }
 
-    # ── IVV Price ── try 3 different Yahoo endpoints
-    ivv_price = None
-    errors = []
+    # ── IVV Price from Yahoo v8 ──
+    try:
+        url = 'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d'
+        resp = requests.get(url, timeout=10, headers=headers)
+        data = resp.json()
+        meta = data['chart']['result'][0]['meta']
+        # Try every possible price field in order of preference
+        ivv_price = (
+            meta.get('regularMarketPrice') or
+            meta.get('chartPreviousClose') or
+            meta.get('previousClose') or
+            meta.get('52WeekHigh') or
+            None
+        )
+        # If still None, try getting the last close from the actual price data
+        if not ivv_price:
+            closes = data['chart']['result'][0]['indicators']['quote'][0].get('close', [])
+            closes = [c for c in closes if c is not None]
+            if closes:
+                ivv_price = closes[-1]
+        result['ivv_price'] = ivv_price
+    except Exception as e:
+        result['ivv_price'] = None
+        result['ivv_error'] = str(e)
 
-    # Method 1: Yahoo v8 chart with longer range
-    for range_val in ['5d', '1mo']:
+    # ── USD/ILS from open.er-api.com (confirmed working in debug) ──
+    try:
+        url = 'https://open.er-api.com/v6/latest/USD'
+        resp = requests.get(url, timeout=10)
+        data = resp.json()
+        result['usd_ils_rate'] = data['rates']['ILS']
+    except Exception:
+        # Fallback to Yahoo
         try:
-            url = f'https://query2.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range={range_val}'
-            resp = requests.get(url, timeout=8, headers=headers)
+            url = 'https://query1.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&range=5d'
+            resp = requests.get(url, timeout=10, headers=headers)
             data = resp.json()
             meta = data['chart']['result'][0]['meta']
-            ivv_price = meta.get('regularMarketPrice') or meta.get('previousClose') or meta.get('chartPreviousClose')
-            if ivv_price:
-                break
-        except Exception as e:
-            errors.append(f'v8/{range_val}: {e}')
+            result['usd_ils_rate'] = (
+                meta.get('regularMarketPrice') or
+                meta.get('chartPreviousClose') or
+                meta.get('previousClose')
+            )
+        except Exception as e2:
+            result['usd_ils_rate'] = None
 
-    # Method 2: Yahoo v7 quote
-    if not ivv_price:
-        try:
-            url = 'https://query2.finance.yahoo.com/v7/finance/quote?symbols=IVV&fields=regularMarketPrice,previousClose'
-            resp = requests.get(url, timeout=8, headers=headers)
-            data = resp.json()
-            r0 = data['quoteResponse']['result'][0]
-            ivv_price = r0.get('regularMarketPrice') or r0.get('previousClose')
-        except Exception as e:
-            errors.append(f'v7: {e}')
-
-    # Method 3: Yahoo v10 quoteSummary
-    if not ivv_price:
-        try:
-            url = 'https://query2.finance.yahoo.com/v10/finance/quoteSummary/IVV?modules=price'
-            resp = requests.get(url, timeout=8, headers=headers)
-            data = resp.json()
-            price_data = data['quoteSummary']['result'][0]['price']
-            ivv_price = price_data['regularMarketPrice']['raw']
-        except Exception as e:
-            errors.append(f'v10: {e}')
-
-    result['ivv_price'] = ivv_price
-    if not ivv_price:
-        result['ivv_error'] = ' | '.join(errors)
-
-    # ── USD/ILS Rate ── try Yahoo then fallback to open exchange rate API
-    ils_rate = None
-
-    # Method 1: Yahoo for USDILS=X
-    for sym in ['USDILS=X', 'ILS=X']:
-        try:
-            url = f'https://query2.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d'
-            resp = requests.get(url, timeout=8, headers=headers)
-            data = resp.json()
-            meta = data['chart']['result'][0]['meta']
-            ils_rate = meta.get('regularMarketPrice') or meta.get('previousClose')
-            if ils_rate:
-                break
-        except Exception as e:
-            pass
-
-    # Method 2: Free exchange rate API (no key needed)
-    if not ils_rate:
-        try:
-            url = 'https://open.er-api.com/v6/latest/USD'
-            resp = requests.get(url, timeout=8)
-            data = resp.json()
-            ils_rate = data['rates'].get('ILS')
-        except Exception as e:
-            pass
-
-    # Method 3: Another free source
-    if not ils_rate:
-        try:
-            url = 'https://api.exchangerate-api.com/v4/latest/USD'
-            resp = requests.get(url, timeout=8)
-            data = resp.json()
-            ils_rate = data['rates'].get('ILS')
-        except Exception as e:
-            pass
-
-    result['usd_ils_rate'] = ils_rate
     return jsonify(result)
 
 @app.route('/api/daughter/<int:did>', methods=['DELETE'])
@@ -502,14 +466,20 @@ def debug_prices():
     }
     results = {}
     try:
-        resp = requests.get('https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d', timeout=8, headers=headers)
+        resp = requests.get('https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d', timeout=10, headers=headers)
         data = resp.json()
         meta = data['chart']['result'][0]['meta']
-        # Show ALL meta keys so we can see what price fields exist
-        results['ivv_meta_keys'] = {k: v for k, v in meta.items() if 'rice' in k.lower() or 'close' in k.lower() or 'price' in k.lower()}
-        results['ivv_meta_full'] = meta
+        closes = data['chart']['result'][0]['indicators']['quote'][0].get('close', [])
+        results['all_meta'] = meta
+        results['last_5_closes'] = [c for c in closes if c is not None][-5:]
     except Exception as e:
-        results['ivv_error'] = str(e)
+        results['error'] = str(e)
+    try:
+        resp2 = requests.get('https://open.er-api.com/v6/latest/USD', timeout=10)
+        d2 = resp2.json()
+        results['usd_ils'] = d2['rates'].get('ILS')
+    except Exception as e:
+        results['usd_ils_error'] = str(e)
     return jsonify(results)
 
 
