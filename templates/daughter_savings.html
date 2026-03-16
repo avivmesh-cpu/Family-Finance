@@ -111,11 +111,8 @@
 let entries = [], sharesChart = null, valueChart = null, liveIVV = null;
 
 // Auto-fetch prices when month changes
-document.addEventListener('DOMContentLoaded', () => {
-  const picker = document.getElementById('entry-month');
-  picker.addEventListener('change', () => {
-    if (picker.value) autoFetchPrices();
-  });
+document.getElementById('entry-month').addEventListener('change', function() {
+  if (this.value) autoFetchPrices();
 });
 
 ['entry-ils','entry-ivv','entry-rate'].forEach(id => {
