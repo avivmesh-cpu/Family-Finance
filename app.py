@@ -552,5 +552,34 @@ def debug_prices():
 
 
 
+@app.route('/api/debug-stock/<symbol>', methods=['GET'])
+@auth_required
+def debug_stock(symbol):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://finance.yahoo.com',
+    }
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol.upper()}?interval=1d&range=5d"
+        resp = requests.get(url, timeout=10, headers=headers)
+        data = resp.json()
+        result_data = data['chart']['result'][0]
+        meta = result_data['meta']
+        closes = result_data['indicators']['quote'][0].get('close', [])
+        closes_clean = [c for c in closes if c is not None]
+        return jsonify({
+            'status': resp.status_code,
+            'symbol': symbol.upper(),
+            'regularMarketPrice': meta.get('regularMarketPrice'),
+            'chartPreviousClose': meta.get('chartPreviousClose'),
+            'previousClose': meta.get('previousClose'),
+            'closes': closes_clean,
+            'meta_keys': list(meta.keys())
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
