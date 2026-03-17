@@ -9,216 +9,234 @@
     <label>Month:</label>
     <input type="month" id="month-picker" class="month-input" />
     <button class="btn btn-primary btn-sm" id="load-btn">Load</button>
+    <div class="spacer"></div>
+    <button id="save-btn" class="btn btn-sm" onclick="saveAll()" style="background:var(--green);color:#000;font-weight:600">&#10003; Save All</button>
   </div>
 
   <div class="kpi-grid">
-    <div class="kpi-card green">
-      <div class="kpi-label">Total Balance</div>
-      <div class="kpi-value green" id="kpi-total">₪0</div>
-      <div class="kpi-sub">All accounts</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">Bank Accounts</div>
-      <div class="kpi-value" id="kpi-bank">₪0</div>
-    </div>
-    <div class="kpi-card blue">
-      <div class="kpi-label">Stock Accounts</div>
-      <div class="kpi-value blue" id="kpi-stocks">₪0</div>
-    </div>
-    <div class="kpi-card purple">
-      <div class="kpi-label">Education Fund</div>
-      <div class="kpi-value" style="color:var(--purple)" id="kpi-edu">₪0</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">Other</div>
-      <div class="kpi-value" id="kpi-other">₪0</div>
-    </div>
+    <div class="kpi-card green"><div class="kpi-label">Total Balance</div><div class="kpi-value green" id="kpi-total">&#8362;0</div></div>
+    <div class="kpi-card"><div class="kpi-label">Bank Accounts</div><div class="kpi-value" id="kpi-bank">&#8362;0</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">Stock Accounts</div><div class="kpi-value blue" id="kpi-stocks">&#8362;0</div></div>
+    <div class="kpi-card purple"><div class="kpi-label">Education Fund</div><div class="kpi-value" style="color:var(--purple)" id="kpi-edu">&#8362;0</div></div>
+    <div class="kpi-card"><div class="kpi-label">Other</div><div class="kpi-value" id="kpi-other">&#8362;0</div></div>
   </div>
 
   <div class="grid-2 mb-24">
-    <div class="card">
-      <div class="card-title mb-16">Asset Allocation</div>
-      <div class="chart-wrap"><canvas id="allocation-chart"></canvas></div>
-    </div>
-    <div class="card">
-      <div class="card-title mb-16">Historical Growth</div>
-      <div class="chart-wrap"><canvas id="history-chart"></canvas></div>
-    </div>
+    <div class="card"><div class="card-title mb-16">Asset Allocation</div><div class="chart-wrap"><canvas id="alloc-chart"></canvas></div></div>
+    <div class="card"><div class="card-title mb-16">Historical Growth</div><div class="chart-wrap"><canvas id="hist-chart"></canvas></div></div>
   </div>
 
   <div class="card">
     <div class="flex-between mb-16">
       <div>
         <div class="card-title">Account Balances</div>
-        <div class="card-subtitle" id="table-subtitle">Enter balances for this month</div>
+        <div class="card-subtitle" id="tbl-subtitle">Enter balances for this month</div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="addAccount()">+ Add Account</button>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Account Name</th>
-            <th>Type</th>
-            <th>Balance (₪)</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="assets-tbody"></tbody>
-      </table>
-    </div>
-    <div class="mt-16 text-right">
-      <button class="btn btn-primary" onclick="saveAll()">Save All Changes</button>
-    </div>
+    <table style="width:100%">
+      <thead>
+        <tr>
+          <th>Account</th>
+          <th style="width:160px">Type</th>
+          <th style="width:200px;text-align:right">Balance (&#8362;)</th>
+        </tr>
+      </thead>
+      <tbody id="assets-tbody"></tbody>
+      <tfoot><tr>
+        <td colspan="2" style="padding:10px 14px;font-size:12px;color:var(--text3)">Total</td>
+        <td style="text-align:right;padding:10px 14px;font-family:'DM Mono',monospace;font-weight:500;color:var(--green)" id="assets-total">&#8362;0</td>
+      </tr></tfoot>
+    </table>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-
 <script>
-let currentYear, currentMonth, currentAssets = [];
-let allocChart = null, histChart = null;
+let CY, CM, allocChart = null, histChart = null;
 
-const ACCOUNT_TYPES = { bank: 'Bank', stocks: 'Stocks', education: 'Education Fund', other: 'Other' };
+// These 6 accounts always appear every month
+const FIXED_ACCOUNTS = [
+  { name: 'Bank Hapoalim',            type: 'bank'      },
+  { name: 'Bank Mizrachi',            type: 'bank'      },
+  { name: 'IBI',                      type: 'stocks'    },
+  { name: 'Education fund - MTRX',    type: 'education' },
+  { name: 'Education fund - Symetrium', type: 'education' },
+  { name: 'Education fund - Get sat', type: 'education' },
+];
+
+const TYPE_LABELS = { bank: 'Bank', stocks: 'Stocks', education: 'Education Fund', other: 'Other' };
 
 function getYM() {
-  const [y,m] = document.getElementById('month-picker').value.split('-');
+  const [y, m] = document.getElementById('month-picker').value.split('-');
   return { year: +y, month: +m };
 }
 
 async function loadData() {
   const { year, month } = getYM();
-  currentYear = year; currentMonth = month;
-  document.getElementById('table-subtitle').textContent = `Balances for ${FF.monthLabel(year, month)}`;
-  currentAssets = await FF.get(`/api/assets?year=${year}&month=${month}`);
-  renderTable();
-  updateKPIs();
-  await loadHistoryChart();
-  renderAllocationChart();
+  CY = year; CM = month;
+  document.getElementById('tbl-subtitle').textContent = 'Balances for ' + FF.monthLabel(year, month);
+
+  // Fetch saved balances for this month
+  const saved = await FF.get('/api/assets?year=' + year + '&month=' + month);
+
+  // Build display list: always show all 6 fixed accounts
+  // Use saved balance if exists, otherwise 0
+  const displayRows = FIXED_ACCOUNTS.map(fa => {
+    const existing = saved.find(s => s.account_name === fa.name);
+    return {
+      id:           existing ? existing.id   : null,
+      account_name: fa.name,
+      account_type: fa.type,
+      balance:      existing ? existing.balance : 0,
+      isNew:        !existing
+    };
+  });
+
+  // Also add any extra accounts the user added that aren't in FIXED_ACCOUNTS
+  saved.forEach(s => {
+    if (!FIXED_ACCOUNTS.some(fa => fa.name === s.account_name)) {
+      displayRows.push({ id: s.id, account_name: s.account_name, account_type: s.account_type, balance: s.balance, isNew: false });
+    }
+  });
+
+  buildTable(displayRows);
+  updateKPIs(displayRows);
+  buildAllocChart(displayRows);
+  await buildHistChart();
 }
 
-function renderTable() {
-  const tbody = document.getElementById('assets-tbody');
-  tbody.innerHTML = '';
-  if (!currentAssets.length) {
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-state-icon">◎</div><p>No accounts added yet for this month</p></div></td></tr>`;
-    return;
-  }
-  currentAssets.forEach(a => {
+function buildTable(accountRows) {
+  const tb = document.getElementById('assets-tbody');
+  tb.innerHTML = '';
+  accountRows.forEach((a, i) => {
     const tr = document.createElement('tr');
-    tr.dataset.id = a.id;
-    tr.innerHTML = `
-      <td><input class="editable-cell" value="${a.account_name}" data-field="account_name" /></td>
-      <td>
-        <select class="editable-cell form-select" data-field="account_type">
-          ${Object.entries(ACCOUNT_TYPES).map(([v,l]) => `<option value="${v}" ${a.account_type===v?'selected':''}>${l}</option>`).join('')}
-        </select>
-      </td>
-      <td><input class="editable-cell mono" type="number" value="${a.balance}" data-field="balance" /></td>
-      <td class="text-right"><button class="btn btn-danger btn-icon" onclick="deleteAccount(${a.id})">✕</button></td>
-    `;
-    tbody.appendChild(tr);
+    tr.dataset.idx = i;
+    const isFixed = FIXED_ACCOUNTS.some(fa => fa.name === a.account_name);
+    tr.innerHTML =
+      '<td>' +
+        (isFixed
+          ? '<span style="color:var(--text);font-size:14px;padding:4px 8px;display:block">' + a.account_name + '</span>'
+          : '<input class="editable-cell" data-f="name" value="' + a.account_name + '" style="width:100%" />') +
+      '</td>' +
+      '<td>' +
+        '<select class="editable-cell" data-f="type" style="width:150px">' +
+          Object.entries(TYPE_LABELS).map(([v, l]) =>
+            '<option value="' + v + '"' + (a.account_type === v ? ' selected' : '') + '>' + l + '</option>'
+          ).join('') +
+        '</select>' +
+      '</td>' +
+      '<td style="text-align:right">' +
+        '<input class="editable-cell mono" data-f="balance" type="number" value="' + (a.balance || '') + '"' +
+          ' placeholder="0" style="text-align:right;width:180px" oninput="liveUpdate()"' +
+          ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();moveNext(this);}" />' +
+      '</td>';
+    tb.appendChild(tr);
   });
+  calcTotal();
+}
+
+function liveUpdate() {
+  const data = getTableData();
+  updateKPIs(data);
+  calcTotal();
+}
+
+function moveNext(el) {
+  const all = Array.from(document.querySelectorAll('[data-f=balance]'));
+  const i = all.indexOf(el);
+  if (i < all.length - 1) all[i + 1].focus();
+}
+
+function calcTotal() {
+  const data = getTableData();
+  const t = data.reduce((s, a) => s + (+a.balance || 0), 0);
+  document.getElementById('assets-total').textContent = FF.ils(t);
 }
 
 function getTableData() {
-  const rows = document.querySelectorAll('#assets-tbody tr[data-id]');
-  return Array.from(rows).map(tr => ({
-    id: +tr.dataset.id,
-    account_name: tr.querySelector('[data-field=account_name]').value,
-    account_type: tr.querySelector('[data-field=account_type]').value,
-    balance: +tr.querySelector('[data-field=balance]').value
-  }));
+  const rows = [];
+  document.querySelectorAll('#assets-tbody tr[data-idx]').forEach((tr, i) => {
+    const nameEl = tr.querySelector('[data-f=name]');
+    rows.push({
+      account_name: nameEl ? nameEl.value : FIXED_ACCOUNTS[i] ? FIXED_ACCOUNTS[i].name : '',
+      account_type: tr.querySelector('[data-f=type]').value,
+      balance:      parseFloat(tr.querySelector('[data-f=balance]').value) || 0
+    });
+  });
+  return rows;
 }
 
 async function saveAll() {
+  const btn = document.getElementById('save-btn');
+  btn.textContent = 'Saving...'; btn.disabled = true;
   const data = getTableData();
   try {
     for (const a of data) {
-      await FF.post('/api/assets', { year: currentYear, month: currentMonth, ...a });
+      await FF.post('/api/assets', {
+        year: CY, month: CM,
+        account_name: a.account_name,
+        account_type: a.account_type,
+        balance: a.balance
+      });
     }
+    FF.toast('Saved!');
     await loadData();
-    FF.toast('All balances saved!');
-  } catch(e) { FF.toast('Error saving: ' + e.message, 'error'); }
+  } catch(e) {
+    FF.toast('Error: ' + e.message, 'error');
+  }
+  btn.textContent = '&#10003; Save All'; btn.disabled = false;
 }
 
-function updateKPIs() {
-  const byType = { bank: 0, stocks: 0, education: 0, other: 0 };
-  currentAssets.forEach(a => { byType[a.account_type] = (byType[a.account_type]||0) + a.balance; });
-  const total = Object.values(byType).reduce((s,v)=>s+v,0);
-  document.getElementById('kpi-total').textContent = FF.ils(total);
-  document.getElementById('kpi-bank').textContent = FF.ils(byType.bank);
-  document.getElementById('kpi-stocks').textContent = FF.ils(byType.stocks);
-  document.getElementById('kpi-edu').textContent = FF.ils(byType.education);
-  document.getElementById('kpi-other').textContent = FF.ils(byType.other);
+function updateKPIs(accountRows) {
+  const by = { bank: 0, stocks: 0, education: 0, other: 0 };
+  accountRows.forEach(a => { by[a.account_type] = (by[a.account_type] || 0) + (+a.balance || 0); });
+  const total = Object.values(by).reduce((s, v) => s + v, 0);
+  document.getElementById('kpi-total').textContent  = FF.ils(total);
+  document.getElementById('kpi-bank').textContent   = FF.ils(by.bank);
+  document.getElementById('kpi-stocks').textContent = FF.ils(by.stocks);
+  document.getElementById('kpi-edu').textContent    = FF.ils(by.education);
+  document.getElementById('kpi-other').textContent  = FF.ils(by.other);
 }
 
-function renderAllocationChart() {
-  const byType = { bank: 0, stocks: 0, education: 0, other: 0 };
-  currentAssets.forEach(a => { byType[a.account_type] = (byType[a.account_type]||0) + a.balance; });
-  const ctx = document.getElementById('allocation-chart').getContext('2d');
+function buildAllocChart(accountRows) {
+  const by = { bank: 0, stocks: 0, education: 0, other: 0 };
+  accountRows.forEach(a => { by[a.account_type] = (by[a.account_type] || 0) + (+a.balance || 0); });
+  const ctx = document.getElementById('alloc-chart').getContext('2d');
   if (allocChart) allocChart.destroy();
   allocChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels: Object.values(ACCOUNT_TYPES),
-      datasets: [{
-        data: Object.values(byType),
+      labels: Object.values(TYPE_LABELS),
+      datasets: [{ data: Object.values(by),
         backgroundColor: [FF.colors.blue, FF.colors.gold, FF.colors.purple, FF.colors.teal],
-        borderWidth: 2, borderColor: '#1f2434'
-      }]
+        borderWidth: 2, borderColor: '#1f2434' }]
     },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
   });
 }
 
-async function loadHistoryChart() {
+async function buildHistChart() {
   const history = await FF.get('/api/assets/history');
   const keys = Object.keys(history).sort().slice(-24);
-  const labels = keys.map(k => { const [y,m]=k.split('-'); return FF.monthLabel(+y,+m); });
-  const totals = keys.map(k => Object.values(history[k]).reduce((s,v)=>s+v,0));
-  const ctx = document.getElementById('history-chart').getContext('2d');
+  const ctx = document.getElementById('hist-chart').getContext('2d');
   if (histChart) histChart.destroy();
   histChart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels,
-      datasets: [{
-        label: 'Total Assets',
-        data: totals,
-        borderColor: FF.colors.green,
-        backgroundColor: FF.gradient(ctx, FF.colors.green),
-        tension: 0.4, fill: true, pointRadius: 3
-      }]
+      labels: keys.map(k => { const [y, m] = k.split('-'); return FF.monthLabel(+y, +m); }),
+      datasets: [{ label: 'Total',
+        data: keys.map(k => Object.values(history[k]).reduce((s, v) => s + v, 0)),
+        borderColor: FF.colors.green, backgroundColor: FF.gradient(ctx, FF.colors.green),
+        tension: 0.4, fill: true, pointRadius: 3 }]
     },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { y: { ticks: { callback: v => '₪' + (v/1000).toFixed(0) + 'k' } } }
-    }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { y: { ticks: { callback: v => '\u20AA' + (v / 1000).toFixed(0) + 'k' } } } }
   });
 }
 
-async function addAccount() {
-  try {
-    await FF.post('/api/assets', {
-      year: currentYear, month: currentMonth,
-      account_name: 'New Account', account_type: 'bank', balance: 0
-    });
-    await loadData();
-  } catch(e) { FF.toast('Error', 'error'); }
-}
-
-async function deleteAccount(id) {
-  if (!confirm('Remove this account?')) return;
-  await FF.del(`/api/assets/${id}`);
-  await loadData();
-  FF.toast('Removed');
-}
-
 const { year, month } = FF.currentYM();
-document.getElementById('month-picker').value = `${year}-${String(month).padStart(2,'0')}`;
+document.getElementById('month-picker').value = year + '-' + String(month).padStart(2, '0');
 document.getElementById('load-btn').addEventListener('click', loadData);
 loadData();
 </script>
