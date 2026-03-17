@@ -19,7 +19,8 @@
   </div>
 
   <div class="card">
-    <div class="card-title mb-16">Add Monthly Investment</div>
+    <div class="card-title mb-4">Add Monthly Investment</div>
+    <div class="card-subtitle mb-16">Select a month, press Calculate to fetch prices for that date, then Save.</div>
 
     <div class="form-row" style="align-items:flex-end;gap:16px;flex-wrap:wrap">
       <div class="form-group">
@@ -28,7 +29,7 @@
       </div>
       <div class="form-group" style="justify-content:flex-end">
         <label class="form-label">&nbsp;</label>
-        <button class="btn btn-primary" onclick="calculate()" id="calc-btn">&#9654; Calculate</button>
+        <button class="btn btn-primary" id="calc-btn" onclick="calculate()">&#9654; Calculate</button>
       </div>
       <div class="form-group">
         <label class="form-label">IVV Price (USD)</label>
@@ -51,8 +52,7 @@
         <button class="btn btn-sm" onclick="saveEntry()" style="background:var(--green);color:#000;font-weight:600">&#10003; Save</button>
       </div>
     </div>
-
-    <div id="calc-status" style="font-size:13px;min-height:20px;margin-top:8px;padding:6px 0;color:var(--text3)"></div>
+    <div id="calc-status" style="font-size:13px;min-height:20px;margin-top:8px;color:var(--text3)"></div>
 
     <div class="section-divider">History</div>
     <div class="table-wrap">
@@ -76,46 +76,46 @@ function calcPreview(){
   document.getElementById('preview').textContent=(ils&&ivv&&rate)?((ils/rate)/ivv).toFixed(6):'—';
 }
 
-// ── Calculate button — fetch prices for selected month ──
+// ── Calculate: fetch prices FOR THE SELECTED MONTH ──
 async function calculate(){
   const mv=document.getElementById('entry-month').value;
   if(!mv){FF.toast('Please select a month first','error');return;}
+  const[y,m]=mv.split('-');
   const btn=document.getElementById('calc-btn');
   const status=document.getElementById('calc-status');
   btn.textContent='Fetching...'; btn.disabled=true;
-  status.textContent='Fetching IVV price and USD/ILS rate...';
+  status.textContent='Fetching prices for '+FF.monthLabel(+y,+m)+'...';
   status.style.color='var(--text3)';
   document.getElementById('entry-ivv').value='';
   document.getElementById('entry-rate').value='';
   document.getElementById('preview').textContent='—';
   try{
-    const resp=await fetch('/api/daughter/fetch-prices');
+    // Pass year and month so backend fetches historical price around the 15th
+    const resp=await fetch(`/api/daughter/fetch-prices?year=${y}&month=${m}`);
     const d=await resp.json();
-    let ok=true, msg='';
+    let msgs=[], ok=true;
     if(d.ivv_price){
       document.getElementById('entry-ivv').value=Number(d.ivv_price).toFixed(2);
-      msg+='IVV: $'+Number(d.ivv_price).toFixed(2);
+      msgs.push('IVV: $'+Number(d.ivv_price).toFixed(2));
     }else{
-      msg+='IVV: not available — enter manually'; ok=false;
+      msgs.push('IVV: unavailable — enter manually'); ok=false;
     }
-    msg+='     ';
     if(d.usd_ils_rate){
       document.getElementById('entry-rate').value=Number(d.usd_ils_rate).toFixed(3);
-      msg+='USD/ILS: '+Number(d.usd_ils_rate).toFixed(3);
+      msgs.push('USD/ILS: '+Number(d.usd_ils_rate).toFixed(3));
     }else{
-      msg+='USD/ILS: not available — enter manually'; ok=false;
+      msgs.push('USD/ILS: unavailable — enter manually'); ok=false;
     }
-    status.textContent=msg;
+    status.textContent=msgs.join('     ');
     status.style.color=ok?'var(--green)':'var(--red)';
     calcPreview();
   }catch(e){
-    status.textContent='Fetch failed: '+e.message;
+    status.textContent='Error: '+e.message;
     status.style.color='var(--red)';
   }
   btn.textContent='&#9654; Calculate'; btn.disabled=false;
 }
 
-// ── Load history ──
 async function loadData(){
   entries=await FF.get('/api/daughter');
   try{const d=await FF.get('/api/daughter/fetch-prices');liveIVV=d.ivv_price;}catch(e){}
@@ -153,11 +153,7 @@ function updateKPIs(){
   document.getElementById('kpi-value').textContent=curVal?'$'+FF.dec(curVal):'—';
   document.getElementById('kpi-invested').textContent=FF.ils(totalILS);
   document.getElementById('kpi-months').textContent=s.length;
-  if(gain!==null){
-    const el=document.getElementById('kpi-gain');
-    el.textContent=(gain>=0?'+':'')+' $'+FF.dec(gain);
-    el.className='kpi-value '+(gain>=0?'green':'red');
-  }
+  if(gain!==null){const el=document.getElementById('kpi-gain');el.textContent=(gain>=0?'+':'')+' $'+FF.dec(gain);el.className='kpi-value '+(gain>=0?'green':'red');}
 }
 
 function renderCharts(){
@@ -182,7 +178,7 @@ async function saveEntry(){
   const ils=+document.getElementById('entry-ils').value;
   const ivv=+document.getElementById('entry-ivv').value;
   const rate=+document.getElementById('entry-rate').value;
-  if(!mv||!ils||!ivv||!rate){FF.toast('Please fill in all fields (click Calculate first)','error');return;}
+  if(!mv||!ils||!ivv||!rate){FF.toast('Fill in all fields — click Calculate first','error');return;}
   const[y,m]=mv.split('-');
   try{
     await FF.post('/api/daughter',{year:+y,month:+m,ils_invested:ils,ivv_price_usd:ivv,usd_ils_rate:rate});

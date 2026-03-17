@@ -28,7 +28,7 @@
 
   <div class="card mb-24">
     <div class="flex-between mb-16">
-      <div><div class="card-title">Income</div><div class="card-subtitle">Edit values, then click Save All</div></div>
+      <div><div class="card-title">Income</div><div class="card-subtitle">Edit values then click Save All</div></div>
       <div class="flex gap-8">
         <button class="btn btn-ghost btn-sm" onclick="addRow('income_salary','New Salary')">+ Salary</button>
         <button class="btn btn-ghost btn-sm" onclick="addRow('income_other','Other Income')">+ Other</button>
@@ -47,7 +47,7 @@
 
   <div class="card">
     <div class="flex-between mb-16">
-      <div><div class="card-title">Expenses</div><div class="card-subtitle">Edit values, then click Save All</div></div>
+      <div><div class="card-title">Expenses</div><div class="card-subtitle">Edit values then click Save All</div></div>
       <div class="flex gap-8">
         <select id="cat-select" class="form-input" style="width:150px">
           <option value="">-- category --</option>
@@ -81,7 +81,6 @@ function getDesc(d){return d.replace(/^\[[^\]]+\]\s*/,'');}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function rowById(id){return rows.find(r=>r.id===id);}
 
-// ── Read all DOM inputs into rows array ──
 function syncDOM(){
   document.querySelectorAll('#income-tbody tr[data-rowid]').forEach(tr=>{
     const r=rowById(+tr.dataset.rowid); if(!r)return;
@@ -91,28 +90,31 @@ function syncDOM(){
   });
   document.querySelectorAll('#exp-container tr[data-rowid]').forEach(tr=>{
     const r=rowById(+tr.dataset.rowid); if(!r)return;
-    const cat=tr.dataset.cat||getCat(r.description);
+    const cat=tr.dataset.cat||'Other';
     r.description='['+cat+'] '+tr.querySelector('[data-f=desc]').value;
     r.amount=parseFloat(tr.querySelector('[data-f=amt]').value)||0;
   });
 }
 
-// ── Load from server ──
 async function loadData(){
   const{year,month}=getYM(); CY=year; CM=month;
+  // Load existing data — do NOT auto-seed here, seeding is done on first Save
   let data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
-  if(!data.some(r=>r.description.includes('Inbal')))
+
+  // Only seed Inbal & Aviv if this month has zero income rows at all
+  const hasAnyIncome=data.some(r=>r.type.startsWith('income'));
+  if(!hasAnyIncome){
     await FF.post('/api/transactions',{year,month,type:'income_salary',description:'Inbal Salary',amount:0});
-  if(!data.some(r=>r.description.includes('Aviv')))
     await FF.post('/api/transactions',{year,month,type:'income_salary',description:'Aviv Salary',amount:0});
-  data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
+    data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
+  }
+
   rows=data.map(r=>({...r,_del:false,_new:false}));
   buildTables(); updateKPIs(); buildCatChart();
   await buildTrendChart();
 }
 
-// ── Build tables — called once per load, not on every keystroke ──
-function buildTables(){ buildIncome(); buildExpenses(); }
+function buildTables(){buildIncome();buildExpenses();}
 
 function buildIncome(){
   const tb=document.getElementById('income-tbody');
@@ -128,20 +130,19 @@ function buildIncome(){
       <td><input class="editable-cell" data-f="desc" value="${esc(r.description)}"
         onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
       <td><input class="editable-cell mono" data-f="amt" type="number" value="${r.amount||''}" placeholder="0"
-        style="text-align:right;width:160px"
-        oninput="liveKPI()"
+        style="text-align:right;width:160px" oninput="liveUpdate()"
         onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
       <td><button class="btn btn-danger btn-icon" onclick="delRow(${r.id})">&#x2715;</button></td>`;
     tb.appendChild(tr);
   });
-  calcIncomTotal();
+  calcTotals();
 }
 
 function buildExpenses(){
   const ec=document.getElementById('exp-container');
   ec.innerHTML='';
   const expRows=rows.filter(r=>!r._del&&r.type==='expense');
-  if(!expRows.length){ec.innerHTML='<div class="empty-state"><p>No expenses yet.</p></div>';calcExpTotal();return;}
+  if(!expRows.length){ec.innerHTML='<div class="empty-state"><p>No expenses yet. Select a category above and click + Add Row.</p></div>';calcTotals();return;}
   const groups={};
   expRows.forEach(r=>{const c=getCat(r.description);(groups[c]=groups[c]||[]).push(r);});
   Object.keys(groups).sort().forEach(cat=>{
@@ -152,8 +153,7 @@ function buildExpenses(){
       <td style="padding-left:28px"><input class="editable-cell" data-f="desc" value="${esc(getDesc(r.description))}"
         onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" style="width:100%" /></td>
       <td style="width:170px;text-align:right"><input class="editable-cell mono" data-f="amt" type="number"
-        value="${r.amount||''}" placeholder="0" style="text-align:right;width:150px"
-        oninput="liveKPI()"
+        value="${r.amount||''}" placeholder="0" style="text-align:right;width:150px" oninput="liveUpdate()"
         onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
       <td style="width:40px"><button class="btn btn-danger btn-icon" onclick="delRow(${r.id})">&#x2715;</button></td>
     </tr>`).join('');
@@ -166,31 +166,26 @@ function buildExpenses(){
       <table style="width:100%"><tbody>${rowsHtml}</tbody></table>`;
     ec.appendChild(sec);
   });
-  calcExpTotal();
+  calcTotals();
 }
 
-// Move focus to next input on Enter
 function moveNext(el){
   const all=Array.from(document.querySelectorAll('.editable-cell'));
   const i=all.indexOf(el);
-  if(i>=0&&i<all.length-1) all[i+1].focus();
+  if(i<all.length-1)all[i+1].focus();
 }
 
-// Live KPI update without rebuilding DOM
-function liveKPI(){
+function liveUpdate(){
   syncDOM();
   updateKPIs();
-  calcIncomTotal();
-  calcExpTotal();
+  calcTotals();
 }
 
-function calcIncomTotal(){
-  const t=rows.filter(r=>!r._del&&r.type.startsWith('income')).reduce((s,r)=>s+(+r.amount||0),0);
-  document.getElementById('income-total').textContent=FF.ils(t);
-}
-function calcExpTotal(){
-  const t=rows.filter(r=>!r._del&&r.type==='expense').reduce((s,r)=>s+(+r.amount||0),0);
-  document.getElementById('exp-total').textContent=FF.ils(t);
+function calcTotals(){
+  const it=rows.filter(r=>!r._del&&r.type.startsWith('income')).reduce((s,r)=>s+(+r.amount||0),0);
+  document.getElementById('income-total').textContent=FF.ils(it);
+  const et=rows.filter(r=>!r._del&&r.type==='expense').reduce((s,r)=>s+(+r.amount||0),0);
+  document.getElementById('exp-total').textContent=FF.ils(et);
 }
 
 function updateKPIs(){
@@ -203,15 +198,13 @@ function updateKPIs(){
   document.getElementById('kpi-other').textContent=FF.ils(oth);
   document.getElementById('kpi-expenses').textContent=FF.ils(exp);
   const el=document.getElementById('kpi-savings');
-  el.textContent=FF.ils(sav);
-  el.className='kpi-value '+(sav>=0?'green':'red');
+  el.textContent=FF.ils(sav); el.className='kpi-value '+(sav>=0?'green':'red');
 }
 
 let tempId=-1;
 function addRow(type,desc){
   rows.push({id:tempId--,type,description:desc,amount:0,_del:false,_new:true});
   buildIncome();
-  // Focus last amount field
   setTimeout(()=>{const a=document.querySelectorAll('#income-tbody [data-f=amt]');if(a.length)a[a.length-1].focus();},60);
 }
 function addExpense(){
@@ -223,25 +216,24 @@ function addExpense(){
 }
 function delRow(id){
   syncDOM();
-  const r=rowById(id); if(r)r._del=true;
-  buildTables(); updateKPIs(); buildCatChart();
+  const r=rowById(id);if(r)r._del=true;
+  buildTables();updateKPIs();buildCatChart();
 }
 
-// ── Save all to server ──
 async function saveAll(){
   syncDOM();
   const btn=document.getElementById('save-btn');
-  btn.textContent='Saving...'; btn.disabled=true;
+  btn.textContent='Saving...';btn.disabled=true;
   try{
-    for(const r of rows.filter(x=>x._del&&!x._new)) await FF.del(`/api/transactions/${r.id}`);
+    for(const r of rows.filter(x=>x._del&&!x._new))await FF.del(`/api/transactions/${r.id}`);
     for(const r of rows.filter(x=>!x._del&&x._new))
       await FF.post('/api/transactions',{year:CY,month:CM,type:r.type,description:r.description,amount:r.amount||0});
     for(const r of rows.filter(x=>!x._del&&!x._new))
       await FF.put(`/api/transactions/${r.id}`,{type:r.type,description:r.description,amount:r.amount||0});
     FF.toast('All saved!');
-    await loadData();
+    await loadData(); // reload fresh + updates trend chart
   }catch(e){FF.toast('Error: '+e.message,'error');}
-  btn.textContent='&#10003; Save All'; btn.disabled=false;
+  btn.textContent='&#10003; Save All';btn.disabled=false;
 }
 
 function buildCatChart(){
@@ -252,6 +244,7 @@ function buildCatChart(){
   const cats=Object.keys(groups);
   const ctx=document.getElementById('cat-chart').getContext('2d');
   if(cChart)cChart.destroy();
+  if(!cats.length){cChart=null;return;}
   cChart=new Chart(ctx,{type:'doughnut',
     data:{labels:cats,datasets:[{data:cats.map(c=>groups[c]),
       backgroundColor:cats.map(c=>CATS[c]||'#9aa0bb'),borderWidth:2,borderColor:'#1f2434'}]},

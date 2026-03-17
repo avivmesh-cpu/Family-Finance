@@ -14,7 +14,7 @@
   </div>
 
   <div class="grid-2 mb-24">
-    <div class="card"><div class="card-title mb-16">Portfolio Allocation</div><div class="chart-wrap"><canvas id="alloc-chart"></canvas></div></div>
+    <div class="card"><div class="card-title mb-16">Allocation</div><div class="chart-wrap"><canvas id="alloc-chart"></canvas></div></div>
     <div class="card"><div class="card-title mb-16">P&amp;L per Position</div><div class="chart-wrap"><canvas id="pnl-chart"></canvas></div></div>
   </div>
 
@@ -22,12 +22,12 @@
     <div class="flex-between mb-16">
       <div>
         <div class="card-title">Holdings</div>
-        <div class="card-subtitle">Edit rows, then click Save. Type ticker + Enter to fetch price automatically.</div>
+        <div class="card-subtitle">Edit rows then click Save All. After saving, click Refresh Prices.</div>
       </div>
       <div class="flex gap-8">
-        <button class="btn btn-ghost btn-sm" onclick="refreshAllPrices()">&#8635; Refresh Prices</button>
+        <button class="btn btn-ghost btn-sm" onclick="refreshPrices()">&#8635; Refresh Prices</button>
         <button class="btn btn-ghost btn-sm" onclick="addRow()">+ Add</button>
-        <button class="btn btn-sm" onclick="saveAll()" style="background:var(--green);color:#000;font-weight:600">&#10003; Save All</button>
+        <button id="save-btn" class="btn btn-sm" onclick="saveAll()" style="background:var(--green);color:#000;font-weight:600">&#10003; Save All</button>
       </div>
     </div>
     <div class="table-wrap">
@@ -40,57 +40,92 @@
         <tbody id="stocks-tbody"></tbody>
       </table>
     </div>
-    <div style="font-size:11px;color:var(--text3);margin-top:8px">* Type ticker and press Enter to auto-fetch price.</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:8px">1. Enter ticker, Qty, Avg Cost &rarr; 2. Click Save All &rarr; 3. Click Refresh Prices</div>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-let holdings=[], prices={}, aChart=null, pChart=null;
-let tempId=-1;
+let holdings=[], prices={}, aChart=null, pChart=null, tempId=-1;
 
 async function loadData(){
   holdings=await FF.get('/api/stocks');
-  if(holdings.length) try{ prices=await FF.get('/api/stocks/prices'); }catch(e){}
+  holdings.forEach(h=>{h._del=false;h._new=false;});
+  if(holdings.length){
+    try{prices=await FF.get('/api/stocks/prices');}catch(e){}
+  }
   buildTable(); updateKPIs(); buildCharts();
 }
 
 function buildTable(){
   const tb=document.getElementById('stocks-tbody');
   tb.innerHTML='';
-  if(!holdings.length){
+  const active=holdings.filter(h=>!h._del);
+  if(!active.length){
     tb.innerHTML='<tr><td colspan="10"><div class="empty-state"><p>No holdings. Click + Add.</p></div></td></tr>';
     return;
   }
-  holdings.filter(h=>!h._del).forEach(h=>{
-    const cur=prices[h.symbol];
-    const cost=h.quantity*h.purchase_price;
-    const val=cur?h.quantity*cur:null;
+  active.forEach(h=>{
+    const cur=prices[h.symbol]||null;
+    const cost=(+h.quantity||0)*(+h.purchase_price||0);
+    const val=cur?(+h.quantity||0)*cur:null;
     const pnl=val!==null?val-cost:null;
     const pct=pnl!==null&&cost?(pnl/cost)*100:null;
     const tr=document.createElement('tr');
     tr.dataset.hid=h.id;
     tr.innerHTML=`
-      <td><input class="editable-cell mono" data-f="symbol" value="${h.symbol}" style="width:75px;font-weight:600;text-transform:uppercase"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();fetchSymbolPrice(this.value.trim().toUpperCase(),${h.id},this)}" /></td>
-      <td><input class="editable-cell mono" data-f="quantity" type="number" value="${h.quantity||''}" placeholder="0" style="width:70px" /></td>
-      <td><input class="editable-cell mono" data-f="purchase_price" type="number" value="${h.purchase_price||''}" placeholder="0" style="width:80px" /></td>
-      <td class="td-mono" style="color:${cur?'var(--text)':'var(--text3)'}" id="cur-${h.id}">${cur?'$'+FF.dec(cur):'—'}</td>
-      <td class="td-mono">$${FF.dec(cost)}</td>
-      <td class="td-mono">${val?'$'+FF.dec(val):'—'}</td>
-      <td class="td-mono ${pnl===null?'':(pnl>=0?'td-positive':'td-negative')}">${pnl!==null?(pnl>=0?'+':'')+' $'+FF.dec(pnl):'—'}</td>
-      <td class="td-mono ${pct===null?'':(pct>=0?'td-positive':'td-negative')}">${pct!==null?(pct>=0?'+':'')+FF.dec(pct)+'%':'—'}</td>
-      <td><input class="editable-cell" data-f="notes" value="${h.notes||''}" placeholder="notes..." /></td>
+      <td><input class="editable-cell mono" data-f="symbol" value="${h.symbol||''}"
+        style="width:75px;font-weight:600;text-transform:uppercase"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
+      <td><input class="editable-cell mono" data-f="quantity" type="number" value="${h.quantity||''}" placeholder="0"
+        style="width:70px" oninput="liveUpdateRow(this)"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
+      <td><input class="editable-cell mono" data-f="purchase_price" type="number" value="${h.purchase_price||''}" placeholder="0"
+        style="width:85px" oninput="liveUpdateRow(this)"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
+      <td class="td-mono" id="cur-${h.id}" style="color:${cur?'var(--text)':'var(--text3)'}">${cur?'$'+FF.dec(cur):'—'}</td>
+      <td class="td-mono" id="cost-${h.id}">$${FF.dec(cost)}</td>
+      <td class="td-mono" id="val-${h.id}">${val!==null?'$'+FF.dec(val):'—'}</td>
+      <td class="td-mono ${pnl===null?'':(pnl>=0?'td-positive':'td-negative')}" id="pnl-${h.id}">${pnl!==null?(pnl>=0?'+':'')+' $'+FF.dec(pnl):'—'}</td>
+      <td class="td-mono ${pct===null?'':(pct>=0?'td-positive':'td-negative')}" id="pct-${h.id}">${pct!==null?(pct>=0?'+':'')+FF.dec(pct)+'%':'—'}</td>
+      <td><input class="editable-cell" data-f="notes" value="${h.notes||''}" placeholder="notes..."
+        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
       <td><button class="btn btn-danger btn-icon" onclick="delRow(${h.id})">&#x2715;</button></td>`;
-    document.getElementById('stocks-tbody').appendChild(tr);
+    tb.appendChild(tr);
   });
+}
+
+function moveNext(el){
+  const all=Array.from(document.querySelectorAll('.editable-cell'));
+  const i=all.indexOf(el);if(i<all.length-1)all[i+1].focus();
+}
+
+// Live update cost/value cells when qty or price changes
+function liveUpdateRow(input){
+  const tr=input.closest('tr');if(!tr)return;
+  const id=+tr.dataset.hid;
+  const qty=+(tr.querySelector('[data-f=quantity]').value)||0;
+  const pp=+(tr.querySelector('[data-f=purchase_price]').value)||0;
+  const cost=qty*pp;
+  const cur=prices[tr.querySelector('[data-f=symbol]').value.toUpperCase()]||null;
+  const val=cur?qty*cur:null;
+  const pnl=val!==null?val-cost:null;
+  const pct=pnl!==null&&cost?(pnl/cost)*100:null;
+  const costEl=document.getElementById('cost-'+id);
+  const valEl=document.getElementById('val-'+id);
+  const pnlEl=document.getElementById('pnl-'+id);
+  const pctEl=document.getElementById('pct-'+id);
+  if(costEl)costEl.textContent='$'+FF.dec(cost);
+  if(valEl)valEl.textContent=val!==null?'$'+FF.dec(val):'—';
+  if(pnlEl){pnlEl.textContent=pnl!==null?(pnl>=0?'+':'')+' $'+FF.dec(pnl):'—';pnlEl.className='td-mono '+(pnl===null?'':(pnl>=0?'td-positive':'td-negative'));}
+  if(pctEl){pctEl.textContent=pct!==null?(pct>=0?'+':'')+FF.dec(pct)+'%':'—';pctEl.className='td-mono '+(pct===null?'':(pct>=0?'td-positive':'td-negative'));}
+  syncFromDOM();updateKPIs();
 }
 
 function syncFromDOM(){
   document.querySelectorAll('#stocks-tbody tr[data-hid]').forEach(tr=>{
-    const id=+tr.dataset.hid, h=holdings.find(x=>x.id===id);
-    if(!h)return;
+    const id=+tr.dataset.hid, h=holdings.find(x=>x.id===id);if(!h)return;
     h.symbol=(tr.querySelector('[data-f=symbol]').value||'').toUpperCase();
     h.quantity=+(tr.querySelector('[data-f=quantity]').value)||0;
     h.purchase_price=+(tr.querySelector('[data-f=purchase_price]').value)||0;
@@ -98,65 +133,43 @@ function syncFromDOM(){
   });
 }
 
-async function fetchSymbolPrice(sym, id, input){
-  if(!sym)return;
-  input.blur();
-  const cell=document.getElementById('cur-'+id);
-  if(cell) cell.textContent='...';
-  try{
-    const data=await FF.get(`/api/stock-price/${encodeURIComponent(sym)}`);
-    if(data.price){
-      prices[sym]=data.price;
-      if(cell) cell.textContent='$'+FF.dec(data.price);
-      // Update symbol in holdings
-      const h=holdings.find(x=>x.id===id);
-      if(h) h.symbol=sym;
-      FF.toast(sym+': $'+FF.dec(data.price));
-      updateKPIs(); buildCharts();
-    } else {
-      if(cell) cell.textContent='—';
-      FF.toast('Price not found for '+sym,'error');
-    }
-  }catch(e){
-    if(cell) cell.textContent='—';
-  }
-}
-
 function addRow(){
-  holdings.push({id:tempId--,symbol:'',quantity:0,purchase_price:0,notes:'',_new:true});
+  holdings.push({id:tempId--,symbol:'',quantity:0,purchase_price:0,notes:'',_del:false,_new:true});
   buildTable();
   setTimeout(()=>{
-    const inputs=document.querySelectorAll('[data-f=symbol]');
-    if(inputs.length) inputs[inputs.length-1].focus();
-  },80);
+    const s=document.querySelectorAll('[data-f=symbol]');if(s.length)s[s.length-1].focus();
+  },60);
 }
-
 function delRow(id){
   syncFromDOM();
-  const h=holdings.find(x=>x.id===id);
-  if(h) h._del=true;
-  buildTable(); updateKPIs(); buildCharts();
+  const h=holdings.find(x=>x.id===id);if(h)h._del=true;
+  buildTable();updateKPIs();buildCharts();
 }
 
 async function saveAll(){
   syncFromDOM();
-  const btn=event.target; btn.textContent='Saving...'; btn.disabled=true;
+  const btn=document.getElementById('save-btn');
+  btn.textContent='Saving...';btn.disabled=true;
   try{
-    for(const h of holdings.filter(x=>x._del&&!x._new)) await FF.del(`/api/stocks/${h.id}`);
+    for(const h of holdings.filter(x=>x._del&&!x._new))await FF.del(`/api/stocks/${h.id}`);
     for(const h of holdings.filter(x=>!x._del&&x._new&&h.symbol))
       await FF.post('/api/stocks',{symbol:h.symbol,quantity:h.quantity,purchase_price:h.purchase_price,notes:h.notes||''});
     for(const h of holdings.filter(x=>!x._del&&!x._new))
       await FF.put(`/api/stocks/${h.id}`,{symbol:h.symbol,quantity:h.quantity,purchase_price:h.purchase_price,notes:h.notes||''});
-    FF.toast('Saved!');
+    FF.toast('Saved! Now click Refresh Prices to update values.');
     await loadData();
-  }catch(e){ FF.toast('Error: '+e.message,'error'); }
-  btn.textContent='✓ Save All'; btn.disabled=false;
+  }catch(e){FF.toast('Error: '+e.message,'error');}
+  btn.textContent='&#10003; Save All';btn.disabled=false;
 }
 
-async function refreshAllPrices(){
-  try{ prices=await FF.get('/api/stocks/prices'); }catch(e){}
-  buildTable(); updateKPIs(); buildCharts();
-  FF.toast('Prices updated');
+async function refreshPrices(){
+  if(!holdings.filter(h=>!h._del).length){FF.toast('No holdings yet','error');return;}
+  FF.toast('Fetching prices...');
+  try{
+    prices=await FF.get('/api/stocks/prices');
+    buildTable();updateKPIs();buildCharts();
+    FF.toast('Prices updated!');
+  }catch(e){FF.toast('Price fetch error: '+e.message,'error');}
 }
 
 function updateKPIs(){
@@ -164,34 +177,32 @@ function updateKPIs(){
   let cost=0,val=0;
   holdings.filter(h=>!h._del).forEach(h=>{
     cost+=h.quantity*h.purchase_price;
-    if(prices[h.symbol]) val+=h.quantity*prices[h.symbol];
+    if(prices[h.symbol])val+=h.quantity*prices[h.symbol];
   });
   const pnl=val-cost,pct=cost?(pnl/cost)*100:0;
   document.getElementById('kpi-value').textContent=val?'$'+FF.dec(val):'—';
   document.getElementById('kpi-cost').textContent='$'+FF.dec(cost);
   document.getElementById('kpi-count').textContent=holdings.filter(h=>!h._del).length;
   const pe=document.getElementById('kpi-pnl');
-  pe.textContent=val?(pnl>=0?'+':'')+' $'+FF.dec(pnl):'—';
-  pe.className='kpi-value '+(pnl>=0?'green':'red');
+  pe.textContent=val?(pnl>=0?'+':'')+' $'+FF.dec(pnl):'—';pe.className='kpi-value '+(pnl>=0?'green':'red');
   const pp=document.getElementById('kpi-pnl-pct');
-  pp.textContent=val?(pct>=0?'+':'')+FF.dec(pct)+'%':'—';
-  pp.className='kpi-value '+(pct>=0?'green':'red');
+  pp.textContent=val?(pct>=0?'+':'')+FF.dec(pct)+'%':'—';pp.className='kpi-value '+(pct>=0?'green':'red');
 }
 
 function buildCharts(){
   const active=holdings.filter(h=>!h._del);
-  const syms=active.map(h=>h.symbol);
+  const syms=active.map(h=>h.symbol).filter(Boolean);
   const vals=active.map(h=>prices[h.symbol]?h.quantity*prices[h.symbol]:h.quantity*h.purchase_price);
   const cols=[FF.colors.gold,FF.colors.blue,FF.colors.green,FF.colors.purple,FF.colors.teal,FF.colors.red];
-  const ctx1=document.getElementById('alloc-chart').getContext('2d');
+  const c1=document.getElementById('alloc-chart').getContext('2d');
   if(aChart)aChart.destroy();
-  aChart=new Chart(ctx1,{type:'doughnut',
+  if(syms.length)aChart=new Chart(c1,{type:'doughnut',
     data:{labels:syms,datasets:[{data:vals,backgroundColor:cols.slice(0,syms.length),borderWidth:2,borderColor:'#1f2434'}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right'}}}});
   const pnlD=active.map(h=>{const p=prices[h.symbol];return p?h.quantity*p-h.quantity*h.purchase_price:0;});
-  const ctx2=document.getElementById('pnl-chart').getContext('2d');
+  const c2=document.getElementById('pnl-chart').getContext('2d');
   if(pChart)pChart.destroy();
-  pChart=new Chart(ctx2,{type:'bar',
+  if(syms.length)pChart=new Chart(c2,{type:'bar',
     data:{labels:syms,datasets:[{label:'P&L',data:pnlD,
       backgroundColor:pnlD.map(v=>v>=0?'rgba(76,175,136,0.75)':'rgba(224,92,106,0.75)'),borderRadius:4}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
