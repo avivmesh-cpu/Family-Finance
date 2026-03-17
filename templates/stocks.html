@@ -70,7 +70,8 @@ function buildTable(){
     return;
   }
   active.forEach(h=>{
-    const cur=prices[h.symbol]||null;
+    const sym = (h.symbol||'').toUpperCase();
+    const cur=prices[sym]||null;
     const cost=(+h.quantity||0)*(+h.purchase_price||0);
     const val=cur?(+h.quantity||0)*cur:null;
     const pnl=val!==null?val-cost:null;
@@ -78,7 +79,7 @@ function buildTable(){
     const tr=document.createElement('tr');
     tr.dataset.hid=h.id;
     tr.innerHTML=`
-      <td><input class="editable-cell mono" data-f="symbol" value="${h.symbol||''}"
+      <td><input class="editable-cell mono" data-f="symbol" value="${sym}"
         style="width:75px;font-weight:600;text-transform:uppercase"
         onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
       <td><input class="editable-cell mono" data-f="quantity" type="number" value="${h.quantity||''}" placeholder="0"
@@ -184,8 +185,9 @@ function updateKPIs(){
   syncFromDOM();
   let cost=0,val=0;
   holdings.filter(h=>!h._del).forEach(h=>{
+    const sym=(h.symbol||'').toUpperCase();
     cost+=h.quantity*h.purchase_price;
-    if(prices[h.symbol])val+=h.quantity*prices[h.symbol];
+    if(prices[sym])val+=h.quantity*prices[sym];
   });
   const pnl=val-cost,pct=cost?(pnl/cost)*100:0;
   document.getElementById('kpi-value').textContent=val?'$'+FF.dec(val):'—';
@@ -199,15 +201,15 @@ function updateKPIs(){
 
 function buildCharts(){
   const active=holdings.filter(h=>!h._del);
-  const syms=active.map(h=>h.symbol).filter(Boolean);
-  const vals=active.map(h=>prices[h.symbol]?h.quantity*prices[h.symbol]:h.quantity*h.purchase_price);
+  const syms=active.map(h=>(h.symbol||'').toUpperCase()).filter(Boolean);
+  const vals=active.map(h=>{const s=(h.symbol||'').toUpperCase();return prices[s]?h.quantity*prices[s]:h.quantity*h.purchase_price;});
   const cols=[FF.colors.gold,FF.colors.blue,FF.colors.green,FF.colors.purple,FF.colors.teal,FF.colors.red];
   const c1=document.getElementById('alloc-chart').getContext('2d');
   if(aChart)aChart.destroy();
   if(syms.length)aChart=new Chart(c1,{type:'doughnut',
     data:{labels:syms,datasets:[{data:vals,backgroundColor:cols.slice(0,syms.length),borderWidth:2,borderColor:'#1f2434'}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right'}}}});
-  const pnlD=active.map(h=>{const p=prices[h.symbol];return p?h.quantity*p-h.quantity*h.purchase_price:0;});
+  const pnlD=active.map(h=>{const s=(h.symbol||'').toUpperCase();const p=prices[s];return p?h.quantity*p-h.quantity*h.purchase_price:0;});
   const c2=document.getElementById('pnl-chart').getContext('2d');
   if(pChart)pChart.destroy();
   if(syms.length)pChart=new Chart(c2,{type:'bar',
