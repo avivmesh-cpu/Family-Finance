@@ -19,20 +19,16 @@
   </div>
 
   <div class="card">
-    <div class="flex-between mb-16">
-      <div><div class="card-title">Add Monthly Investment</div>
-      <div class="card-subtitle">Change month to auto-fetch IVV price and USD/ILS rate</div></div>
-      <button class="btn btn-ghost btn-sm" id="refresh-btn" onclick="fetchPrices()">&#8635; Fetch Prices</button>
-    </div>
+    <div class="card-title mb-16">Add Monthly Investment</div>
 
     <div class="form-row" style="align-items:flex-end;gap:16px;flex-wrap:wrap">
       <div class="form-group">
         <label class="form-label">Month</label>
         <input type="month" id="entry-month" class="form-input" />
       </div>
-      <div class="form-group">
-        <label class="form-label">ILS to Invest</label>
-        <input type="number" id="entry-ils" class="form-input" value="300" style="width:110px" oninput="calcPreview()" />
+      <div class="form-group" style="justify-content:flex-end">
+        <label class="form-label">&nbsp;</label>
+        <button class="btn btn-primary" onclick="calculate()" id="calc-btn">&#9654; Calculate</button>
       </div>
       <div class="form-group">
         <label class="form-label">IVV Price (USD)</label>
@@ -43,15 +39,20 @@
         <input type="number" id="entry-rate" class="form-input" step="0.001" style="width:120px" oninput="calcPreview()" />
       </div>
       <div class="form-group">
-        <label class="form-label">Shares Preview</label>
+        <label class="form-label">ILS to Invest</label>
+        <input type="number" id="entry-ils" class="form-input" value="300" style="width:110px" oninput="calcPreview()" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Shares to Buy</label>
         <div class="form-input" id="preview" style="width:120px;color:var(--accent);font-family:'DM Mono',monospace;background:var(--bg3)">—</div>
       </div>
       <div class="form-group" style="justify-content:flex-end">
         <label class="form-label">&nbsp;</label>
-        <button class="btn btn-primary" onclick="addEntry()">Save Investment</button>
+        <button class="btn btn-sm" onclick="saveEntry()" style="background:var(--green);color:#000;font-weight:600">&#10003; Save</button>
       </div>
     </div>
-    <div id="price-status" style="font-size:12px;min-height:18px;margin-top:6px;color:var(--text3)"></div>
+
+    <div id="calc-status" style="font-size:13px;min-height:20px;margin-top:8px;padding:6px 0;color:var(--text3)"></div>
 
     <div class="section-divider">History</div>
     <div class="table-wrap">
@@ -75,55 +76,58 @@ function calcPreview(){
   document.getElementById('preview').textContent=(ils&&ivv&&rate)?((ils/rate)/ivv).toFixed(6):'—';
 }
 
-// ── Fetch prices — completely standalone, never touches entries ──
-async function fetchPrices(){
-  const btn=document.getElementById('refresh-btn');
-  const status=document.getElementById('price-status');
+// ── Calculate button — fetch prices for selected month ──
+async function calculate(){
+  const mv=document.getElementById('entry-month').value;
+  if(!mv){FF.toast('Please select a month first','error');return;}
+  const btn=document.getElementById('calc-btn');
+  const status=document.getElementById('calc-status');
   btn.textContent='Fetching...'; btn.disabled=true;
-  status.textContent='Contacting price servers...';
+  status.textContent='Fetching IVV price and USD/ILS rate...';
   status.style.color='var(--text3)';
   document.getElementById('entry-ivv').value='';
   document.getElementById('entry-rate').value='';
   document.getElementById('preview').textContent='—';
   try{
-    const d=await fetch('/api/daughter/fetch-prices').then(r=>r.json());
-    let msg='';
+    const resp=await fetch('/api/daughter/fetch-prices');
+    const d=await resp.json();
+    let ok=true, msg='';
     if(d.ivv_price){
       document.getElementById('entry-ivv').value=Number(d.ivv_price).toFixed(2);
       msg+='IVV: $'+Number(d.ivv_price).toFixed(2);
-    } else {
-      msg+='IVV: not available (enter manually)';
+    }else{
+      msg+='IVV: not available — enter manually'; ok=false;
     }
-    msg+='   ';
+    msg+='     ';
     if(d.usd_ils_rate){
       document.getElementById('entry-rate').value=Number(d.usd_ils_rate).toFixed(3);
       msg+='USD/ILS: '+Number(d.usd_ils_rate).toFixed(3);
-    } else {
-      msg+='USD/ILS: not available';
+    }else{
+      msg+='USD/ILS: not available — enter manually'; ok=false;
     }
     status.textContent=msg;
-    status.style.color=(d.ivv_price&&d.usd_ils_rate)?'var(--green)':'var(--red)';
+    status.style.color=ok?'var(--green)':'var(--red)';
     calcPreview();
   }catch(e){
-    status.textContent='Fetch failed: '+e.message+' — enter manually';
+    status.textContent='Fetch failed: '+e.message;
     status.style.color='var(--red)';
   }
-  btn.textContent='&#8635; Fetch Prices'; btn.disabled=false;
+  btn.textContent='&#9654; Calculate'; btn.disabled=false;
 }
 
 // ── Load history ──
 async function loadData(){
   entries=await FF.get('/api/daughter');
-  try{ const d=await FF.get('/api/daughter/fetch-prices'); liveIVV=d.ivv_price; }catch(e){}
+  try{const d=await FF.get('/api/daughter/fetch-prices');liveIVV=d.ivv_price;}catch(e){}
   renderHistory(); updateKPIs(); renderCharts();
 }
 
 function renderHistory(){
   const tb=document.getElementById('history-tbody');
   tb.innerHTML='';
-  const sorted=[...entries].sort((a,b)=>b.year-a.year||b.month-a.month);
-  if(!sorted.length){tb.innerHTML='<tr><td colspan="8"><div class="empty-state"><p>No entries yet.</p></div></td></tr>';return;}
-  sorted.forEach(r=>{
+  const s=[...entries].sort((a,b)=>b.year-a.year||b.month-a.month);
+  if(!s.length){tb.innerHTML='<tr><td colspan="8"><div class="empty-state"><p>No entries yet. Select a month and click Calculate.</p></div></td></tr>';return;}
+  s.forEach(r=>{
     const tr=document.createElement('tr');
     tr.innerHTML=`<td>${FF.monthLabel(r.year,r.month)}</td>
       <td class="td-mono">${FF.ils(r.ils_invested)}</td>
@@ -139,17 +143,21 @@ function renderHistory(){
 
 function updateKPIs(){
   if(!entries.length)return;
-  const sorted=[...entries].sort((a,b)=>a.year-b.year||a.month-b.month);
-  const last=sorted[sorted.length-1];
-  const totalILS=sorted.reduce((s,r)=>s+r.ils_invested,0);
-  const totalUSD=sorted.reduce((s,r)=>s+(r.ils_invested/r.usd_ils_rate),0);
+  const s=[...entries].sort((a,b)=>a.year-b.year||a.month-b.month);
+  const last=s[s.length-1];
+  const totalILS=s.reduce((x,r)=>x+r.ils_invested,0);
+  const totalUSD=s.reduce((x,r)=>x+(r.ils_invested/r.usd_ils_rate),0);
   const curVal=liveIVV?last.cumulative_shares*liveIVV:null;
   const gain=curVal?curVal-totalUSD:null;
   document.getElementById('kpi-shares').textContent=last.cumulative_shares.toFixed(6);
   document.getElementById('kpi-value').textContent=curVal?'$'+FF.dec(curVal):'—';
   document.getElementById('kpi-invested').textContent=FF.ils(totalILS);
-  document.getElementById('kpi-months').textContent=sorted.length;
-  if(gain!==null){const el=document.getElementById('kpi-gain');el.textContent=(gain>=0?'+':'')+' $'+FF.dec(gain);el.className='kpi-value '+(gain>=0?'green':'red');}
+  document.getElementById('kpi-months').textContent=s.length;
+  if(gain!==null){
+    const el=document.getElementById('kpi-gain');
+    el.textContent=(gain>=0?'+':'')+' $'+FF.dec(gain);
+    el.className='kpi-value '+(gain>=0?'green':'red');
+  }
 }
 
 function renderCharts(){
@@ -169,37 +177,30 @@ function renderCharts(){
       scales:{y:{ticks:{callback:v=>'$'+v.toFixed(0)}}}}});
 }
 
-async function addEntry(){
+async function saveEntry(){
   const mv=document.getElementById('entry-month').value;
   const ils=+document.getElementById('entry-ils').value;
   const ivv=+document.getElementById('entry-ivv').value;
   const rate=+document.getElementById('entry-rate').value;
-  if(!mv||!ils||!ivv||!rate){FF.toast('Fill in all fields','error');return;}
+  if(!mv||!ils||!ivv||!rate){FF.toast('Please fill in all fields (click Calculate first)','error');return;}
   const[y,m]=mv.split('-');
   try{
     await FF.post('/api/daughter',{year:+y,month:+m,ils_invested:ils,ivv_price_usd:ivv,usd_ils_rate:rate});
     await loadData();
-    FF.toast('Saved!');
+    FF.toast('Investment saved!');
+    document.getElementById('calc-status').textContent='';
   }catch(e){FF.toast('Error: '+e.message,'error');}
 }
 
 async function delEntry(id){
-  if(!confirm('Delete?'))return;
+  if(!confirm('Delete this entry?'))return;
   await FF.del(`/api/daughter/${id}`);
   await loadData();
   FF.toast('Deleted');
 }
 
-// Init
 const{year,month}=FF.currentYM();
 document.getElementById('entry-month').value=`${year}-${String(month).padStart(2,'0')}`;
-
-// Attach change listener to month input
-document.getElementById('entry-month').addEventListener('change', function(){
-  if(this.value) fetchPrices();
-});
-
-// Load history first, then fetch prices
-loadData().then(()=>fetchPrices());
+loadData();
 </script>
 {% endblock %}

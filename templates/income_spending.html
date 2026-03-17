@@ -10,7 +10,7 @@
     <input type="month" id="month-picker" class="month-input" />
     <button class="btn btn-primary btn-sm" id="load-btn">Load</button>
     <div class="spacer"></div>
-    <button class="btn btn-sm" onclick="saveAll()" style="background:var(--green);color:#000;font-weight:600">&#10003; Save All</button>
+    <button id="save-btn" class="btn btn-sm" onclick="saveAll()" style="background:var(--green);color:#000;font-weight:600">&#10003; Save All</button>
   </div>
 
   <div class="kpi-grid">
@@ -26,30 +26,28 @@
     <div class="card"><div class="card-title mb-16">12-Month Trend</div><div class="chart-wrap"><canvas id="trend-chart"></canvas></div></div>
   </div>
 
-  <!-- INCOME -->
   <div class="card mb-24">
     <div class="flex-between mb-16">
-      <div><div class="card-title">Income</div><div class="card-subtitle">Edit then click Save All</div></div>
+      <div><div class="card-title">Income</div><div class="card-subtitle">Edit values, then click Save All</div></div>
       <div class="flex gap-8">
         <button class="btn btn-ghost btn-sm" onclick="addRow('income_salary','New Salary')">+ Salary</button>
         <button class="btn btn-ghost btn-sm" onclick="addRow('income_other','Other Income')">+ Other</button>
       </div>
     </div>
     <table style="width:100%">
-      <thead><tr><th style="width:110px">Type</th><th>Description</th><th style="width:160px;text-align:right">Amount (&#8362;)</th><th style="width:40px"></th></tr></thead>
+      <thead><tr><th style="width:110px">Type</th><th>Description</th><th style="width:180px;text-align:right">Amount (&#8362;)</th><th style="width:40px"></th></tr></thead>
       <tbody id="income-tbody"></tbody>
       <tfoot><tr>
         <td colspan="2" style="padding:10px 14px;font-size:12px;color:var(--text3)">Total</td>
-        <td style="text-align:right;padding:10px 14px;font-family:'DM Mono',monospace;font-weight:500;color:var(--green)" id="income-total">&#8362;0</td>
+        <td id="income-total" style="text-align:right;padding:10px 14px;font-family:'DM Mono',monospace;font-weight:500;color:var(--green)">&#8362;0</td>
         <td></td>
       </tr></tfoot>
     </table>
   </div>
 
-  <!-- EXPENSES -->
   <div class="card">
     <div class="flex-between mb-16">
-      <div><div class="card-title">Expenses</div><div class="card-subtitle">Edit then click Save All</div></div>
+      <div><div class="card-title">Expenses</div><div class="card-subtitle">Edit values, then click Save All</div></div>
       <div class="flex gap-8">
         <select id="cat-select" class="form-input" style="width:150px">
           <option value="">-- category --</option>
@@ -64,7 +62,7 @@
     <div id="exp-container"></div>
     <div style="display:flex;justify-content:space-between;padding:12px 14px;border-top:1px solid var(--border2);margin-top:4px">
       <span style="font-size:13px;color:var(--text3)">Total Expenses</span>
-      <span style="font-family:'DM Mono',monospace;font-weight:500;color:var(--red)" id="exp-total">&#8362;0</span>
+      <span id="exp-total" style="font-family:'DM Mono',monospace;font-weight:500;color:var(--red)">&#8362;0</span>
     </div>
   </div>
 </div>
@@ -81,84 +79,124 @@ function getYM(){const[y,m]=document.getElementById('month-picker').value.split(
 function getCat(d){const m=d.match(/^\[([^\]]+)\]/);return m?m[1]:'Other';}
 function getDesc(d){return d.replace(/^\[[^\]]+\]\s*/,'');}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function rowById(id){return rows.find(r=>r.id===id);}
 
+// ── Read all DOM inputs into rows array ──
+function syncDOM(){
+  document.querySelectorAll('#income-tbody tr[data-rowid]').forEach(tr=>{
+    const r=rowById(+tr.dataset.rowid); if(!r)return;
+    r.type=tr.querySelector('[data-f=type]').value;
+    r.description=tr.querySelector('[data-f=desc]').value;
+    r.amount=parseFloat(tr.querySelector('[data-f=amt]').value)||0;
+  });
+  document.querySelectorAll('#exp-container tr[data-rowid]').forEach(tr=>{
+    const r=rowById(+tr.dataset.rowid); if(!r)return;
+    const cat=tr.dataset.cat||getCat(r.description);
+    r.description='['+cat+'] '+tr.querySelector('[data-f=desc]').value;
+    r.amount=parseFloat(tr.querySelector('[data-f=amt]').value)||0;
+  });
+}
+
+// ── Load from server ──
 async function loadData(){
   const{year,month}=getYM(); CY=year; CM=month;
   let data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
-  // Seed Inbal & Aviv if missing
   if(!data.some(r=>r.description.includes('Inbal')))
     await FF.post('/api/transactions',{year,month,type:'income_salary',description:'Inbal Salary',amount:0});
   if(!data.some(r=>r.description.includes('Aviv')))
     await FF.post('/api/transactions',{year,month,type:'income_salary',description:'Aviv Salary',amount:0});
   data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
-  rows=data.map(r=>({...r,del:false,isNew:false}));
-  buildTables();
-  updateKPIs();
-  buildCatChart();
+  rows=data.map(r=>({...r,_del:false,_new:false}));
+  buildTables(); updateKPIs(); buildCatChart();
   await buildTrendChart();
 }
 
-// Build tables ONCE — never rebuild on typing
-function buildTables(){
-  // Income
-  const ib=document.getElementById('income-tbody');
-  ib.innerHTML='';
-  rows.filter(r=>!r.del&&r.type.startsWith('income')).forEach(r=>{
+// ── Build tables — called once per load, not on every keystroke ──
+function buildTables(){ buildIncome(); buildExpenses(); }
+
+function buildIncome(){
+  const tb=document.getElementById('income-tbody');
+  tb.innerHTML='';
+  rows.filter(r=>!r._del&&r.type.startsWith('income')).forEach(r=>{
     const tr=document.createElement('tr');
     tr.dataset.rowid=r.id;
     tr.innerHTML=`
-      <td><select class="editable-cell" style="width:95px" data-field="type">
+      <td><select class="editable-cell" data-f="type" style="width:95px">
         <option value="income_salary"${r.type==='income_salary'?' selected':''}>Salary</option>
         <option value="income_other"${r.type==='income_other'?' selected':''}>Other</option>
       </select></td>
-      <td><input class="editable-cell" data-field="description" value="${esc(r.description)}" /></td>
-      <td><input class="editable-cell mono" data-field="amount" type="number" value="${r.amount||''}" placeholder="0" style="text-align:right;width:140px" /></td>
+      <td><input class="editable-cell" data-f="desc" value="${esc(r.description)}"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
+      <td><input class="editable-cell mono" data-f="amt" type="number" value="${r.amount||''}" placeholder="0"
+        style="text-align:right;width:160px"
+        oninput="liveKPI()"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
       <td><button class="btn btn-danger btn-icon" onclick="delRow(${r.id})">&#x2715;</button></td>`;
-    ib.appendChild(tr);
+    tb.appendChild(tr);
   });
-  updateIncomeTotal();
+  calcIncomTotal();
+}
 
-  // Expenses grouped
+function buildExpenses(){
   const ec=document.getElementById('exp-container');
   ec.innerHTML='';
-  const expRows=rows.filter(r=>!r.del&&r.type==='expense');
-  if(!expRows.length){ec.innerHTML='<div class="empty-state"><p>No expenses yet.</p></div>';updateExpTotal();return;}
+  const expRows=rows.filter(r=>!r._del&&r.type==='expense');
+  if(!expRows.length){ec.innerHTML='<div class="empty-state"><p>No expenses yet.</p></div>';calcExpTotal();return;}
   const groups={};
   expRows.forEach(r=>{const c=getCat(r.description);(groups[c]=groups[c]||[]).push(r);});
   Object.keys(groups).sort().forEach(cat=>{
     const cr=groups[cat],col=CATS[cat]||'#9aa0bb';
     const sec=document.createElement('div');
     sec.style.marginBottom='2px';
-    const rowsHtml=cr.map(r=>`<tr data-rowid="${r.id}">
-      <td style="padding-left:28px"><input class="editable-cell" data-field="desc_clean" value="${esc(getDesc(r.description))}" style="width:100%" /></td>
-      <td style="width:160px;text-align:right"><input class="editable-cell mono" data-field="amount" type="number" value="${r.amount||''}" placeholder="0" style="text-align:right;width:130px" /></td>
+    const rowsHtml=cr.map(r=>`<tr data-rowid="${r.id}" data-cat="${cat}">
+      <td style="padding-left:28px"><input class="editable-cell" data-f="desc" value="${esc(getDesc(r.description))}"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" style="width:100%" /></td>
+      <td style="width:170px;text-align:right"><input class="editable-cell mono" data-f="amt" type="number"
+        value="${r.amount||''}" placeholder="0" style="text-align:right;width:150px"
+        oninput="liveKPI()"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
       <td style="width:40px"><button class="btn btn-danger btn-icon" onclick="delRow(${r.id})">&#x2715;</button></td>
     </tr>`).join('');
     sec.innerHTML=`
       <div style="display:flex;align-items:center;padding:7px 14px;background:var(--bg3);border-top:2px solid ${col}">
         <span style="width:10px;height:10px;background:${col};border-radius:2px;display:inline-block;margin-right:10px"></span>
         <span style="font-size:11px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;flex:1">${cat}</span>
-        <span class="cat-total" data-cat="${cat}" style="font-family:'DM Mono',monospace;font-size:13px;color:${col}">${FF.ils(cr.reduce((s,r)=>s+(+r.amount||0),0))}</span>
+        <span style="font-family:'DM Mono',monospace;font-size:13px;color:${col}">${FF.ils(cr.reduce((s,r)=>s+(+r.amount||0),0))}</span>
       </div>
-      <table style="width:100%"><tbody data-cat="${cat}">${rowsHtml}</tbody></table>`;
+      <table style="width:100%"><tbody>${rowsHtml}</tbody></table>`;
     ec.appendChild(sec);
   });
-  updateExpTotal();
+  calcExpTotal();
 }
 
-function updateIncomeTotal(){
-  const t=rows.filter(r=>!r.del&&r.type.startsWith('income')).reduce((s,r)=>s+(+r.amount||0),0);
+// Move focus to next input on Enter
+function moveNext(el){
+  const all=Array.from(document.querySelectorAll('.editable-cell'));
+  const i=all.indexOf(el);
+  if(i>=0&&i<all.length-1) all[i+1].focus();
+}
+
+// Live KPI update without rebuilding DOM
+function liveKPI(){
+  syncDOM();
+  updateKPIs();
+  calcIncomTotal();
+  calcExpTotal();
+}
+
+function calcIncomTotal(){
+  const t=rows.filter(r=>!r._del&&r.type.startsWith('income')).reduce((s,r)=>s+(+r.amount||0),0);
   document.getElementById('income-total').textContent=FF.ils(t);
 }
-function updateExpTotal(){
-  const t=rows.filter(r=>!r.del&&r.type==='expense').reduce((s,r)=>s+(+r.amount||0),0);
+function calcExpTotal(){
+  const t=rows.filter(r=>!r._del&&r.type==='expense').reduce((s,r)=>s+(+r.amount||0),0);
   document.getElementById('exp-total').textContent=FF.ils(t);
 }
 
 function updateKPIs(){
-  const sal=rows.filter(r=>!r.del&&r.type==='income_salary').reduce((s,r)=>s+(+r.amount||0),0);
-  const oth=rows.filter(r=>!r.del&&r.type==='income_other').reduce((s,r)=>s+(+r.amount||0),0);
-  const exp=rows.filter(r=>!r.del&&r.type==='expense').reduce((s,r)=>s+(+r.amount||0),0);
+  const sal=rows.filter(r=>!r._del&&r.type==='income_salary').reduce((s,r)=>s+(+r.amount||0),0);
+  const oth=rows.filter(r=>!r._del&&r.type==='income_other').reduce((s,r)=>s+(+r.amount||0),0);
+  const exp=rows.filter(r=>!r._del&&r.type==='expense').reduce((s,r)=>s+(+r.amount||0),0);
   const inc=sal+oth,sav=inc-exp;
   document.getElementById('kpi-income').textContent=FF.ils(inc);
   document.getElementById('kpi-salary').textContent=FF.ils(sal);
@@ -169,65 +207,46 @@ function updateKPIs(){
   el.className='kpi-value '+(sav>=0?'green':'red');
 }
 
-// Read current DOM values into rows array
-function syncFromDOM(){
-  document.querySelectorAll('#income-tbody tr[data-rowid]').forEach(tr=>{
-    const id=+tr.dataset.rowid, r=rows.find(x=>x.id===id);
-    if(!r)return;
-    r.type=tr.querySelector('[data-field=type]').value;
-    r.description=tr.querySelector('[data-field=description]').value;
-    r.amount=+(tr.querySelector('[data-field=amount]').value)||0;
-  });
-  document.querySelectorAll('[data-rowid]').forEach(tr=>{
-    if(!tr.closest('#income-tbody')){
-      const id=+tr.dataset.rowid, r=rows.find(x=>x.id===id);
-      if(!r)return;
-      const cat=tr.closest('tbody')?tr.closest('tbody').dataset.cat:'Other';
-      const descField=tr.querySelector('[data-field=desc_clean]');
-      const amtField=tr.querySelector('[data-field=amount]');
-      if(descField) r.description=`[${cat}] ${descField.value}`;
-      if(amtField) r.amount=+(amtField.value)||0;
-    }
-  });
-}
-
 let tempId=-1;
 function addRow(type,desc){
-  rows.push({id:tempId--,type,description:desc,amount:0,del:false,isNew:true});
-  buildTables();
+  rows.push({id:tempId--,type,description:desc,amount:0,_del:false,_new:true});
+  buildIncome();
+  // Focus last amount field
+  setTimeout(()=>{const a=document.querySelectorAll('#income-tbody [data-f=amt]');if(a.length)a[a.length-1].focus();},60);
 }
 function addExpense(){
   const cat=document.getElementById('cat-select').value;
   if(!cat){FF.toast('Select a category','error');return;}
-  rows.push({id:tempId--,type:'expense',description:`[${cat}] `,amount:0,del:false,isNew:true});
-  buildTables();
+  rows.push({id:tempId--,type:'expense',description:'['+cat+'] ',amount:0,_del:false,_new:true});
+  buildExpenses();
+  setTimeout(()=>{const a=document.querySelectorAll('#exp-container [data-f=amt]');if(a.length)a[a.length-1].focus();},60);
 }
 function delRow(id){
-  syncFromDOM();
-  const r=rows.find(x=>x.id===id);
-  if(r)r.del=true;
-  buildTables();updateKPIs();buildCatChart();
+  syncDOM();
+  const r=rowById(id); if(r)r._del=true;
+  buildTables(); updateKPIs(); buildCatChart();
 }
 
+// ── Save all to server ──
 async function saveAll(){
-  syncFromDOM();
-  const btn=event.target; btn.textContent='Saving...'; btn.disabled=true;
+  syncDOM();
+  const btn=document.getElementById('save-btn');
+  btn.textContent='Saving...'; btn.disabled=true;
   try{
-    for(const r of rows.filter(x=>x.del&&!x.isNew)) await FF.del(`/api/transactions/${r.id}`);
-    for(const r of rows.filter(x=>!x.del&&x.isNew))
+    for(const r of rows.filter(x=>x._del&&!x._new)) await FF.del(`/api/transactions/${r.id}`);
+    for(const r of rows.filter(x=>!x._del&&x._new))
       await FF.post('/api/transactions',{year:CY,month:CM,type:r.type,description:r.description,amount:r.amount||0});
-    for(const r of rows.filter(x=>!x.del&&!x.isNew))
+    for(const r of rows.filter(x=>!x._del&&!x._new))
       await FF.put(`/api/transactions/${r.id}`,{type:r.type,description:r.description,amount:r.amount||0});
-    FF.toast('Saved!');
+    FF.toast('All saved!');
     await loadData();
-    await buildTrendChart();
   }catch(e){FF.toast('Error: '+e.message,'error');}
-  btn.textContent='✓ Save All'; btn.disabled=false;
+  btn.textContent='&#10003; Save All'; btn.disabled=false;
 }
 
 function buildCatChart(){
   const groups={};
-  rows.filter(r=>!r.del&&r.type==='expense').forEach(r=>{
+  rows.filter(r=>!r._del&&r.type==='expense').forEach(r=>{
     const c=getCat(r.description);groups[c]=(groups[c]||0)+(+r.amount||0);
   });
   const cats=Object.keys(groups);

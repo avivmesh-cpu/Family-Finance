@@ -308,17 +308,29 @@ def get_single_price(symbol):
         return jsonify({'symbol': symbol.upper(), 'price': None, 'error': str(e)})
 
 
+@app.route('/api/stocks/prices', methods=['GET'])
 @auth_required
 def get_stock_prices():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://finance.yahoo.com',
+    }
     with get_db() as conn:
         rows = conn.execute('SELECT DISTINCT symbol FROM stock_holding').fetchall()
     prices = {}
     for r in rows:
         sym = r['symbol']
         try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d"
-            resp = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
-            prices[sym] = resp.json()['chart']['result'][0]['meta']['regularMarketPrice']
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d"
+            resp = requests.get(url, timeout=8, headers=headers)
+            data = resp.json()
+            meta = data['chart']['result'][0]['meta']
+            price = meta.get('regularMarketPrice') or meta.get('chartPreviousClose') or meta.get('previousClose')
+            if not price:
+                closes = data['chart']['result'][0]['indicators']['quote'][0].get('close', [])
+                closes = [c for c in closes if c is not None]
+                if closes: price = closes[-1]
+            prices[sym] = price
         except Exception:
             prices[sym] = None
     return jsonify(prices)
