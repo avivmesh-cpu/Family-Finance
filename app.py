@@ -170,7 +170,32 @@ def transactions_summary():
     return jsonify(summary)
 
 # ASSETS
-@app.route('/api/assets', methods=['GET'])
+@app.route('/api/assets/seed-fixed', methods=['POST'])
+@auth_required
+def seed_fixed_accounts():
+    """Ensure fixed accounts exist for a given month."""
+    d = request.json
+    year, month = d['year'], d['month']
+    fixed = [
+        ('Bank Hapoalim', 'bank'),
+        ('Bank Mizrachi', 'bank'),
+        ('IBI', 'stocks'),
+        ('Education fund - MTRX', 'education'),
+        ('Education fund - Symetrium', 'education'),
+        ('Education fund - Get sat', 'education'),
+    ]
+    with get_db() as conn:
+        for name, atype in fixed:
+            ex = conn.execute(
+                'SELECT id FROM asset_snapshot WHERE year=? AND month=? AND account_name=?',
+                (year, month, name)).fetchone()
+            if not ex:
+                conn.execute(
+                    'INSERT INTO asset_snapshot (year,month,account_name,account_type,balance) VALUES (?,?,?,?,?)',
+                    (year, month, name, atype, 0))
+    return jsonify({'status': 'ok'})
+
+
 @auth_required
 def get_assets():
     year = request.args.get('year', type=int)
@@ -268,46 +293,7 @@ def add_stock():
              d.get('purchase_date',''), d.get('notes','')))
     return jsonify({'id': cur.lastrowid, 'status': 'ok'})
 
-@app.route('/api/stocks/<int:sid>', methods=['PUT'])
-@auth_required
-def update_stock(sid):
-    d = request.json
-    with get_db() as conn:
-        conn.execute(
-            'UPDATE stock_holding SET symbol=?, purchase_price=?, quantity=?, notes=? WHERE id=?',
-            (d.get('symbol','').upper(), float(d.get('purchase_price',0)),
-             float(d.get('quantity',0)), d.get('notes',''), sid))
-    return jsonify({'status': 'ok'})
-
-@app.route('/api/stocks/<int:sid>', methods=['DELETE'])
-@auth_required
-def delete_stock(sid):
-    with get_db() as conn:
-        conn.execute('DELETE FROM stock_holding WHERE id=?', (sid,))
-    return jsonify({'status': 'ok'})
-
-@app.route('/api/stock-price/<symbol>', methods=['GET'])
-@auth_required
-def get_single_price(symbol):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://finance.yahoo.com',
-    }
-    try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol.upper()}?interval=1d&range=5d"
-        resp = requests.get(url, timeout=8, headers=headers)
-        data = resp.json()
-        meta = data['chart']['result'][0]['meta']
-        price = meta.get('regularMarketPrice') or meta.get('chartPreviousClose') or meta.get('previousClose')
-        if not price:
-            closes = data['chart']['result'][0]['indicators']['quote'][0].get('close', [])
-            closes = [c for c in closes if c is not None]
-            if closes: price = closes[-1]
-        return jsonify({'symbol': symbol.upper(), 'price': price})
-    except Exception as e:
-        return jsonify({'symbol': symbol.upper(), 'price': None, 'error': str(e)})
-
-
+# NOTE: /api/stocks/prices MUST come before /api/stocks/<int:sid> to avoid routing conflict
 @app.route('/api/stocks/prices', methods=['GET'])
 @auth_required
 def get_stock_prices():
@@ -334,6 +320,45 @@ def get_stock_prices():
         except Exception:
             prices[sym] = None
     return jsonify(prices)
+
+@app.route('/api/stock-price/<symbol>', methods=['GET'])
+@auth_required
+def get_single_price(symbol):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://finance.yahoo.com',
+    }
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol.upper()}?interval=1d&range=5d"
+        resp = requests.get(url, timeout=8, headers=headers)
+        data = resp.json()
+        meta = data['chart']['result'][0]['meta']
+        price = meta.get('regularMarketPrice') or meta.get('chartPreviousClose') or meta.get('previousClose')
+        if not price:
+            closes = data['chart']['result'][0]['indicators']['quote'][0].get('close', [])
+            closes = [c for c in closes if c is not None]
+            if closes: price = closes[-1]
+        return jsonify({'symbol': symbol.upper(), 'price': price})
+    except Exception as e:
+        return jsonify({'symbol': symbol.upper(), 'price': None, 'error': str(e)})
+
+@app.route('/api/stocks/<int:sid>', methods=['PUT'])
+@auth_required
+def update_stock(sid):
+    d = request.json
+    with get_db() as conn:
+        conn.execute(
+            'UPDATE stock_holding SET symbol=?, purchase_price=?, quantity=?, notes=? WHERE id=?',
+            (d.get('symbol','').upper(), float(d.get('purchase_price',0)),
+             float(d.get('quantity',0)), d.get('notes',''), sid))
+    return jsonify({'status': 'ok'})
+
+@app.route('/api/stocks/<int:sid>', methods=['DELETE'])
+@auth_required
+def delete_stock(sid):
+    with get_db() as conn:
+        conn.execute('DELETE FROM stock_holding WHERE id=?', (sid,))
+    return jsonify({'status': 'ok'})
 
 # DAUGHTER SAVINGS
 @app.route('/api/daughter', methods=['GET'])
@@ -367,56 +392,66 @@ def add_daughter_entry():
 @app.route('/api/daughter/fetch-prices', methods=['GET'])
 @auth_required
 def fetch_ivv_prices():
+    import calendar
+    from datetime import date as dt_date
+
     result = {}
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Referer': 'https://finance.yahoo.com',
     }
 
-    # ── IVV Price from Yahoo v8 ──
-    try:
-        url = 'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d'
+    year  = request.args.get('year',  type=int)
+    month = request.args.get('month', type=int)
+
+    if year and month:
+        # Build Unix timestamps around the 15th of the month (±5 days to catch trading days)
+        target_day = min(15, calendar.monthrange(year, month)[1])
+        target = dt_date(year, month, target_day)
+        epoch  = dt_date(1970, 1, 1)
+        p1 = int((target - epoch).days) * 86400 - (5 * 86400)   # 5 days before
+        p2 = int((target - epoch).days) * 86400 + (10 * 86400)  # 10 days after
+        ivv_url = f'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&period1={p1}&period2={p2}'
+        ils_url = f'https://query1.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&period1={p1}&period2={p2}'
+        result['requested_period'] = f'{p1} to {p2} (around {target})'
+    else:
+        ivv_url = 'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d'
+        ils_url = 'https://query1.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&range=5d'
+
+    def fetch_price(url):
         resp = requests.get(url, timeout=10, headers=headers)
         data = resp.json()
-        meta = data['chart']['result'][0]['meta']
-        # Try every possible price field in order of preference
-        ivv_price = (
-            meta.get('regularMarketPrice') or
-            meta.get('chartPreviousClose') or
-            meta.get('previousClose') or
-            meta.get('52WeekHigh') or
-            None
-        )
-        # If still None, try getting the last close from the actual price data
-        if not ivv_price:
-            closes = data['chart']['result'][0]['indicators']['quote'][0].get('close', [])
-            closes = [c for c in closes if c is not None]
-            if closes:
-                ivv_price = closes[-1]
-        result['ivv_price'] = ivv_price
+        result_data = data['chart']['result'][0]
+        meta = result_data['meta']
+        # For historical: use the closes array (most reliable for past dates)
+        closes = result_data['indicators']['quote'][0].get('close', [])
+        closes = [c for c in closes if c is not None]
+        if closes:
+            return closes[-1]  # last close in the period = closest to the 15th
+        # Fallback to meta fields
+        return (meta.get('regularMarketPrice') or
+                meta.get('chartPreviousClose') or
+                meta.get('previousClose'))
+
+    # IVV
+    try:
+        result['ivv_price'] = fetch_price(ivv_url)
     except Exception as e:
         result['ivv_price'] = None
         result['ivv_error'] = str(e)
 
-    # ── USD/ILS from open.er-api.com (confirmed working in debug) ──
+    # USD/ILS via Yahoo
     try:
-        url = 'https://open.er-api.com/v6/latest/USD'
-        resp = requests.get(url, timeout=10)
-        data = resp.json()
-        result['usd_ils_rate'] = data['rates']['ILS']
+        result['usd_ils_rate'] = fetch_price(ils_url)
     except Exception:
-        # Fallback to Yahoo
+        result['usd_ils_rate'] = None
+
+    # USD/ILS fallback: live exchange rate API
+    if not result.get('usd_ils_rate'):
         try:
-            url = 'https://query1.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&range=5d'
-            resp = requests.get(url, timeout=10, headers=headers)
-            data = resp.json()
-            meta = data['chart']['result'][0]['meta']
-            result['usd_ils_rate'] = (
-                meta.get('regularMarketPrice') or
-                meta.get('chartPreviousClose') or
-                meta.get('previousClose')
-            )
-        except Exception as e2:
+            resp = requests.get('https://open.er-api.com/v6/latest/USD', timeout=10)
+            result['usd_ils_rate'] = resp.json()['rates']['ILS']
+        except Exception:
             result['usd_ils_rate'] = None
 
     return jsonify(result)
