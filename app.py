@@ -286,7 +286,28 @@ def delete_stock(sid):
         conn.execute('DELETE FROM stock_holding WHERE id=?', (sid,))
     return jsonify({'status': 'ok'})
 
-@app.route('/api/stocks/prices', methods=['GET'])
+@app.route('/api/stock-price/<symbol>', methods=['GET'])
+@auth_required
+def get_single_price(symbol):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://finance.yahoo.com',
+    }
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol.upper()}?interval=1d&range=5d"
+        resp = requests.get(url, timeout=8, headers=headers)
+        data = resp.json()
+        meta = data['chart']['result'][0]['meta']
+        price = meta.get('regularMarketPrice') or meta.get('chartPreviousClose') or meta.get('previousClose')
+        if not price:
+            closes = data['chart']['result'][0]['indicators']['quote'][0].get('close', [])
+            closes = [c for c in closes if c is not None]
+            if closes: price = closes[-1]
+        return jsonify({'symbol': symbol.upper(), 'price': price})
+    except Exception as e:
+        return jsonify({'symbol': symbol.upper(), 'price': None, 'error': str(e)})
+
+
 @auth_required
 def get_stock_prices():
     with get_db() as conn:

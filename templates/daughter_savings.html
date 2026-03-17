@@ -46,8 +46,9 @@
     <div class="flex-between mb-16">
       <div>
         <div class="card-title">Add Monthly Investment</div>
-        <div class="card-subtitle">Select a date — IVV price and exchange rate are fetched automatically</div>
+        <div class="card-subtitle">Select month — IVV price and rate are fetched automatically</div>
       </div>
+      <button class="btn btn-ghost btn-sm" onclick="autoFetchPrices()">&#8635; Refresh Prices</button>
     </div>
 
     <div class="form-row" style="align-items:flex-end;gap:16px">
@@ -57,25 +58,19 @@
       </div>
       <div class="form-group">
         <label class="form-label">ILS to Invest</label>
-        <input type="number" id="entry-ils" class="form-input" value="300" style="width:120px" />
+        <input type="number" id="entry-ils" class="form-input" value="300" style="width:120px" oninput="updatePreview()" />
       </div>
       <div class="form-group">
         <label class="form-label">IVV Price (USD)</label>
-        <div style="position:relative">
-          <input type="number" id="entry-ivv" class="form-input" step="0.01" placeholder="fetching..." style="width:150px;padding-right:32px" />
-          <span id="ivv-loader" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--text3);display:none">...</span>
-        </div>
+        <input type="number" id="entry-ivv" class="form-input" step="0.01" style="width:150px" oninput="updatePreview()" />
       </div>
       <div class="form-group">
         <label class="form-label">USD / ILS Rate</label>
-        <div style="position:relative">
-          <input type="number" id="entry-rate" class="form-input" step="0.001" placeholder="fetching..." style="width:130px;padding-right:32px" />
-          <span id="rate-loader" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--text3);display:none">...</span>
-        </div>
+        <input type="number" id="entry-rate" class="form-input" step="0.001" style="width:130px" oninput="updatePreview()" />
       </div>
       <div class="form-group">
         <label class="form-label">Shares to Buy</label>
-        <div class="form-input text-mono" id="preview-shares" style="width:130px;color:var(--accent);background:var(--bg3)">—</div>
+        <div class="form-input" id="preview-shares" style="width:130px;color:var(--accent);background:var(--bg3);font-family:'DM Mono',monospace">—</div>
       </div>
       <div class="form-group" style="justify-content:flex-end">
         <label class="form-label">&nbsp;</label>
@@ -83,21 +78,13 @@
       </div>
     </div>
 
-    <div class="section-divider">Investment History</div>
+    <div id="fetch-status" style="font-size:12px;color:var(--text3);margin-top:4px;min-height:18px"></div>
 
+    <div class="section-divider">Investment History</div>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr>
-            <th>Month</th>
-            <th>ILS Invested</th>
-            <th>USD/ILS</th>
-            <th>USD Amount</th>
-            <th>IVV Price</th>
-            <th>Shares Bought</th>
-            <th>Cumulative</th>
-            <th></th>
-          </tr>
+          <tr><th>Month</th><th>ILS</th><th>USD/ILS</th><th>USD Amt</th><th>IVV Price</th><th>Shares</th><th>Cumulative</th><th></th></tr>
         </thead>
         <tbody id="daughter-tbody"></tbody>
       </table>
@@ -110,70 +97,53 @@
 <script>
 let entries = [], sharesChart = null, valueChart = null, liveIVV = null;
 
-// Auto-fetch prices when month changes
-document.getElementById('entry-month').addEventListener('change', function() {
-  if (this.value) autoFetchPrices();
-});
-
-['entry-ils','entry-ivv','entry-rate'].forEach(id => {
-  document.getElementById(id).addEventListener('input', updatePreview);
-});
-
 function updatePreview() {
   const ils = +document.getElementById('entry-ils').value;
   const ivv = +document.getElementById('entry-ivv').value;
   const rate = +document.getElementById('entry-rate').value;
-  if (ils && ivv && rate) {
-    document.getElementById('preview-shares').textContent = ((ils/rate)/ivv).toFixed(6);
-  } else {
-    document.getElementById('preview-shares').textContent = '—';
-  }
+  document.getElementById('preview-shares').textContent = (ils && ivv && rate) ? ((ils/rate)/ivv).toFixed(6) : '—';
 }
 
+// When month changes, auto-fetch prices
+document.getElementById('entry-month').addEventListener('change', function() {
+  if (this.value) autoFetchPrices();
+});
+
 async function autoFetchPrices() {
-  document.getElementById('ivv-loader').style.display = 'inline';
-  document.getElementById('rate-loader').style.display = 'inline';
+  const status = document.getElementById('fetch-status');
+  status.textContent = 'Fetching prices...';
+  status.style.color = 'var(--text3)';
   document.getElementById('entry-ivv').value = '';
   document.getElementById('entry-rate').value = '';
-  document.getElementById('entry-ivv').placeholder = 'fetching...';
-  document.getElementById('entry-rate').placeholder = 'fetching...';
   try {
     const data = await FF.get('/api/daughter/fetch-prices');
     if (data.ivv_price) {
       document.getElementById('entry-ivv').value = Number(data.ivv_price).toFixed(2);
-      document.getElementById('entry-ivv').placeholder = '';
-    } else {
-      document.getElementById('entry-ivv').placeholder = 'enter manually';
-      FF.toast('IVV price unavailable — enter manually', 'error');
     }
     if (data.usd_ils_rate) {
       document.getElementById('entry-rate').value = Number(data.usd_ils_rate).toFixed(3);
-      document.getElementById('entry-rate').placeholder = '';
-    } else {
-      document.getElementById('entry-rate').placeholder = 'enter manually';
-    }
-    if (data.ivv_price && data.usd_ils_rate) {
-      FF.toast('IVV $' + Number(data.ivv_price).toFixed(2) + ' | Rate ' + Number(data.usd_ils_rate).toFixed(3));
     }
     updatePreview();
+    const ivvTxt = data.ivv_price ? '$'+Number(data.ivv_price).toFixed(2) : 'unavailable';
+    const rateTxt = data.usd_ils_rate ? Number(data.usd_ils_rate).toFixed(3) : 'unavailable';
+    status.textContent = 'IVV: ' + ivvTxt + '  |  USD/ILS: ' + rateTxt;
+    status.style.color = data.ivv_price ? 'var(--green)' : 'var(--red)';
   } catch(e) {
-    FF.toast('Could not fetch prices — enter manually', 'error');
+    status.textContent = 'Could not fetch — enter manually';
+    status.style.color = 'var(--red)';
   }
-  document.getElementById('ivv-loader').style.display = 'none';
-  document.getElementById('rate-loader').style.display = 'none';
 }
 
 async function loadData() {
   entries = await FF.get('/api/daughter');
-  renderTable();
-  updateKPIs();
-  renderCharts();
-  // Fetch live IVV price separately just for KPI display (don't touch the input fields)
+  // Get live IVV for KPI valuation only — don't touch input fields
   try {
     const live = await FF.get('/api/daughter/fetch-prices');
     liveIVV = live.ivv_price;
-    updateKPIs();
   } catch(e) {}
+  renderTable();
+  updateKPIs();
+  renderCharts();
 }
 
 function renderTable() {
@@ -181,21 +151,20 @@ function renderTable() {
   tbody.innerHTML = '';
   const sorted = [...entries].sort((a,b)=>b.year-a.year||b.month-a.month);
   if (!sorted.length) {
-    tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="empty-state-icon">*</div><p>No investments yet. Select a month above to start!</p></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><p>No investments yet. Select a month above to start!</p></div></td></tr>';
     return;
   }
   sorted.forEach(r => {
-    const usdAmt = r.ils_invested / r.usd_ils_rate;
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${FF.monthLabel(r.year,r.month)}</td>
       <td class="td-mono">${FF.ils(r.ils_invested)}</td>
       <td class="td-mono">${FF.dec(r.usd_ils_rate,3)}</td>
-      <td class="td-mono">$${FF.dec(usdAmt)}</td>
+      <td class="td-mono">$${FF.dec(r.ils_invested/r.usd_ils_rate)}</td>
       <td class="td-mono">$${FF.dec(r.ivv_price_usd)}</td>
       <td class="td-mono td-positive">+${r.shares_purchased.toFixed(6)}</td>
       <td class="td-mono">${r.cumulative_shares.toFixed(6)}</td>
-      <td class="text-right"><button class="btn btn-danger btn-icon" onclick="deleteEntry(${r.id})">&#x2715;</button></td>`;
+      <td><button class="btn btn-danger btn-icon" onclick="deleteEntry(${r.id})">&#x2715;</button></td>`;
     tbody.appendChild(tr);
   });
 }
@@ -208,12 +177,10 @@ function updateKPIs() {
   const totalUSDInvested = sorted.reduce((s,r)=>s+(r.ils_invested/r.usd_ils_rate),0);
   const curValue = liveIVV ? last.cumulative_shares * liveIVV : null;
   const gain = curValue ? curValue - totalUSDInvested : null;
-
   document.getElementById('kpi-shares').textContent = last.cumulative_shares.toFixed(6);
   document.getElementById('kpi-cur-value').textContent = curValue ? '$'+FF.dec(curValue) : '—';
   document.getElementById('kpi-invested').textContent = FF.ils(totalILS);
   document.getElementById('kpi-months').textContent = sorted.length;
-
   if (gain !== null) {
     const el = document.getElementById('kpi-gain');
     el.textContent = (gain>=0?'+':'')+' $'+FF.dec(gain);
@@ -224,25 +191,19 @@ function updateKPIs() {
 function renderCharts() {
   const sorted = [...entries].sort((a,b)=>a.year-b.year||a.month-b.month);
   const labels = sorted.map(r=>FF.monthLabel(r.year,r.month));
-
   const ctx1 = document.getElementById('shares-chart').getContext('2d');
   if (sharesChart) sharesChart.destroy();
   sharesChart = new Chart(ctx1, {
-    type:'line',
-    data:{labels, datasets:[{label:'IVV Shares', data:sorted.map(r=>r.cumulative_shares),
-      borderColor:FF.colors.gold, backgroundColor:FF.gradient(ctx1,FF.colors.gold),
-      tension:0.4, fill:true, pointRadius:3}]},
+    type:'line', data:{labels, datasets:[{label:'Shares', data:sorted.map(r=>r.cumulative_shares),
+      borderColor:FF.colors.gold,backgroundColor:FF.gradient(ctx1,FF.colors.gold),tension:0.4,fill:true,pointRadius:3}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       scales:{y:{ticks:{callback:v=>v.toFixed(3)+' sh'}}}}
   });
-
   const ctx2 = document.getElementById('value-chart').getContext('2d');
   if (valueChart) valueChart.destroy();
   valueChart = new Chart(ctx2, {
-    type:'line',
-    data:{labels, datasets:[{label:'Value ($)', data:sorted.map(r=>r.cumulative_shares*r.ivv_price_usd),
-      borderColor:FF.colors.green, backgroundColor:FF.gradient(ctx2,FF.colors.green),
-      tension:0.4, fill:true, pointRadius:3}]},
+    type:'line', data:{labels, datasets:[{label:'Value ($)', data:sorted.map(r=>r.cumulative_shares*r.ivv_price_usd),
+      borderColor:FF.colors.green,backgroundColor:FF.gradient(ctx2,FF.colors.green),tension:0.4,fill:true,pointRadius:3}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       scales:{y:{ticks:{callback:v=>'$'+v.toFixed(0)}}}}
   });
@@ -253,28 +214,25 @@ async function addEntry() {
   const ils = +document.getElementById('entry-ils').value;
   const ivv = +document.getElementById('entry-ivv').value;
   const rate = +document.getElementById('entry-rate').value;
-  if (!monthVal||!ils||!ivv||!rate) {FF.toast('Please fill in all fields','error');return;}
+  if (!monthVal||!ils||!ivv||!rate) { FF.toast('Please fill in all fields','error'); return; }
   const [y,m] = monthVal.split('-');
   try {
     await FF.post('/api/daughter',{year:+y,month:+m,ils_invested:ils,ivv_price_usd:ivv,usd_ils_rate:rate});
     await loadData();
     FF.toast('Investment saved!');
-  } catch(e) {FF.toast('Error: '+e.message,'error');}
+  } catch(e) { FF.toast('Error: '+e.message,'error'); }
 }
 
 async function deleteEntry(id) {
-  if (!confirm('Delete this entry? Cumulative shares will be recalculated.')) return;
+  if (!confirm('Delete this entry?')) return;
   await FF.del(`/api/daughter/${id}`);
   await loadData();
   FF.toast('Deleted');
 }
 
-// Set default month
+// Init: load history, then fetch current prices for input fields
 const {year, month} = FF.currentYM();
-const defaultMonth = `${year}-${String(month).padStart(2,'0')}`;
-document.getElementById('entry-month').value = defaultMonth;
-
-// Load history first, then fetch live prices for the input fields
+document.getElementById('entry-month').value = `${year}-${String(month).padStart(2,'0')}`;
 loadData().then(() => autoFetchPrices());
 </script>
 {% endblock %}
