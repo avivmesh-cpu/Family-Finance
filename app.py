@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 from functools import wraps
 from datetime import datetime
 import requests
-import os, json, io, urllib.parse
+import os, json, io
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-prod')
@@ -14,15 +14,27 @@ if DATABASE_URL:
     import pg8000.native
     if DATABASE_URL.startswith('postgres://'):
         DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-    _p = urllib.parse.urlparse(DATABASE_URL)
+    # Python 3.14 broke urlparse for some hostnames — parse manually
+    # Format: postgresql://user:password@host:port/dbname
+    _url = DATABASE_URL.replace('postgresql://', '')
+    _userinfo, _hostinfo = _url.split('@', 1)
+    _user, _password = _userinfo.split(':', 1)
+    if '/' in _hostinfo:
+        _hostport, _dbname = _hostinfo.split('/', 1)
+    else:
+        _hostport, _dbname = _hostinfo, 'postgres'
+    if ':' in _hostport:
+        _host, _port = _hostport.rsplit(':', 1)
+        _port = int(_port)
+    else:
+        _host, _port = _hostport, 5432
 
     class DB:
         """Thin wrapper around pg8000 that gives dict rows and ? placeholders."""
         def __init__(self):
             self._conn = pg8000.native.Connection(
-                host=_p.hostname, port=_p.port or 5432,
-                database=_p.path.lstrip('/'),
-                user=_p.username, password=_p.password, ssl_context=True)
+                host=_host, port=_port, database=_dbname,
+                user=_user, password=_password, ssl_context=True)
 
         def execute(self, sql, params=()):
             sql = sql.replace('?', '%s').replace('"transaction"', 'transactions')
