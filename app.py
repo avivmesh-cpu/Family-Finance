@@ -14,27 +14,36 @@ if DATABASE_URL:
     import pg8000.native
     if DATABASE_URL.startswith('postgres://'):
         DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-    # Python 3.14 broke urlparse for some hostnames — parse manually
-    # Format: postgresql://user:password@host:port/dbname
-    _url = DATABASE_URL.replace('postgresql://', '')
-    _userinfo, _hostinfo = _url.split('@', 1)
+    # Strip query string (?sslmode=require etc)
+    _clean = DATABASE_URL.replace('postgresql://', '')
+    if '?' in _clean: _clean = _clean.split('?')[0]
+    _userinfo, _hostinfo = _clean.split('@', 1)
     _user, _password = _userinfo.split(':', 1)
-    if '/' in _hostinfo:
-        _hostport, _dbname = _hostinfo.split('/', 1)
-    else:
-        _hostport, _dbname = _hostinfo, 'postgres'
+    _hostport, _dbname = _hostinfo.split('/', 1) if '/' in _hostinfo else (_hostinfo, 'postgres')
     if ':' in _hostport:
         _host, _port = _hostport.rsplit(':', 1)
         _port = int(_port)
     else:
-        _host, _port = _hostport, 5432
+        _host = _hostport
+        # Supabase uses port 6543 for the pooler (transaction mode), 5432 for direct
+        # Try to detect Supabase and use 6543
+        _port = 6543 if 'supabase' in _host else 5432
 
     class DB:
         """Thin wrapper around pg8000 that gives dict rows and ? placeholders."""
         def __init__(self):
-            self._conn = pg8000.native.Connection(
-                host=_host, port=_port, database=_dbname,
-                user=_user, password=_password, ssl_context=True)
+            # Try the specified port first, then fallback
+            ports_to_try = [_port, 6543, 5432] if _port not in [6543, 5432] else [_port, (6543 if _port == 5432 else 5432)]
+            last_err = None
+            for port in ports_to_try:
+                try:
+                    self._conn = pg8000.native.Connection(
+                        host=_host, port=port, database=_dbname,
+                        user=_user, password=_password, ssl_context=True)
+                    return
+                except Exception as e:
+                    last_err = e
+            raise last_err
 
         def execute(self, sql, params=()):
             sql = sql.replace('?', '%s').replace('"transaction"', 'transactions')
@@ -49,7 +58,7 @@ if DATABASE_URL:
             r = self._conn.run('SELECT lastval()')
             return r[0][0] if r else None
 
-        def close(self): pass  # pg8000 native manages connection
+        def close(self): pass
 
     def get_db(): return DB()
     PG = True
