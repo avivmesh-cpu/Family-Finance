@@ -52,13 +52,18 @@ let holdings=[], prices={}, aChart=null, pChart=null, tempId=-1;
 async function loadData(){
   holdings=await FF.get('/api/stocks');
   holdings.forEach(h=>{h._del=false;h._new=false;});
-  if(holdings.filter(h=>!h._del&&h.symbol).length){
-    try{
-      const resp = await fetch('/api/stocks/prices');
-      if(resp.ok) prices = await resp.json();
-    }catch(e){ prices = {}; }
-  }
   buildTable(); updateKPIs(); buildCharts();
+  if(holdings.filter(h=>!h._del&&h.symbol).length) await fetchPrices();
+}
+
+async function fetchPrices(){
+  try{
+    const resp=await fetch('/api/stocks/prices');
+    if(!resp.ok) throw new Error('HTTP '+resp.status);
+    prices=await resp.json();
+    buildTable();updateKPIs();buildCharts();
+    return true;
+  }catch(e){return false;}
 }
 
 function buildTable(){
@@ -167,18 +172,11 @@ async function saveAll(){
 }
 
 async function refreshPrices(){
-  if(!holdings.filter(h=>!h._del).length){FF.toast('Save holdings first, then refresh prices.','error');return;}
+  if(!holdings.filter(h=>!h._del&&h.symbol).length){FF.toast('Add and save holdings first','error');return;}
   FF.toast('Fetching prices...');
-  try{
-    const resp = await fetch('/api/stocks/prices');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    // API returns flat {SYM: price} object
-    prices = data;
-    buildTable(); updateKPIs(); buildCharts();
-    const found = Object.entries(prices).filter(([k,v])=>v).map(([k,v])=>k+' $'+FF.dec(v)).join(', ');
-    FF.toast(found ? 'Prices: ' + found : 'No prices returned — check symbols');
-  }catch(e){FF.toast('Price fetch error: '+e.message,'error');}
+  const ok=await fetchPrices();
+  if(ok){const found=Object.entries(prices).filter(([k,v])=>v).map(([k,v])=>k+' $'+FF.dec(v)).join(', ');FF.toast(found?'Prices: '+found:'No prices — check symbols');}
+  else FF.toast('Could not fetch prices','error');
 }
 
 function updateKPIs(){

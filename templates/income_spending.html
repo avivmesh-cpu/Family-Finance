@@ -28,7 +28,7 @@
 
   <div class="card mb-24">
     <div class="flex-between mb-16">
-      <div><div class="card-title">Income</div><div class="card-subtitle">Edit values then click Save All</div></div>
+      <div><div class="card-title">Income</div><div class="card-subtitle">Edit and press Enter or click Save All</div></div>
       <div class="flex gap-8">
         <button class="btn btn-ghost btn-sm" onclick="addRow('income_salary','New Salary')">+ Salary</button>
         <button class="btn btn-ghost btn-sm" onclick="addRow('income_other','Other Income')">+ Other</button>
@@ -47,7 +47,7 @@
 
   <div class="card">
     <div class="flex-between mb-16">
-      <div><div class="card-title">Expenses</div><div class="card-subtitle">Edit values then click Save All</div></div>
+      <div><div class="card-title">Expenses</div><div class="card-subtitle">Edit and press Enter or click Save All</div></div>
       <div class="flex gap-8">
         <select id="cat-select" class="form-input" style="width:150px">
           <option value="">-- category --</option>
@@ -70,11 +70,8 @@
 
 {% block scripts %}
 <script>
-let CY, CM, rows=[], tChart=null, cChart=null;
-const CATS={Housing:'#5b8df6',Food:'#4caf88',Transport:'#c9a84c',Health:'#e05c6a',
-  Education:'#9b7cf8',Utilities:'#4cc9c9',Insurance:'#f08c4b',
-  Children:'#e87dbd',Entertainment:'#7dc8e8',Clothing:'#a8d86e',Other:'#9aa0bb'};
-
+let CY,CM,rows=[],tChart=null,cChart=null;
+const CATS={Housing:'#5b8df6',Food:'#4caf88',Transport:'#c9a84c',Health:'#e05c6a',Education:'#9b7cf8',Utilities:'#4cc9c9',Insurance:'#f08c4b',Children:'#e87dbd',Entertainment:'#7dc8e8',Clothing:'#a8d86e',Other:'#9aa0bb'};
 function getYM(){const[y,m]=document.getElementById('month-picker').value.split('-');return{year:+y,month:+m};}
 function getCat(d){const m=d.match(/^\[([^\]]+)\]/);return m?m[1]:'Other';}
 function getDesc(d){return d.replace(/^\[[^\]]+\]\s*/,'');}
@@ -83,13 +80,13 @@ function rowById(id){return rows.find(r=>r.id===id);}
 
 function syncDOM(){
   document.querySelectorAll('#income-tbody tr[data-rowid]').forEach(tr=>{
-    const r=rowById(+tr.dataset.rowid); if(!r)return;
+    const r=rowById(+tr.dataset.rowid);if(!r)return;
     r.type=tr.querySelector('[data-f=type]').value;
     r.description=tr.querySelector('[data-f=desc]').value;
     r.amount=parseFloat(tr.querySelector('[data-f=amt]').value)||0;
   });
   document.querySelectorAll('#exp-container tr[data-rowid]').forEach(tr=>{
-    const r=rowById(+tr.dataset.rowid); if(!r)return;
+    const r=rowById(+tr.dataset.rowid);if(!r)return;
     const cat=tr.dataset.cat||'Other';
     r.description='['+cat+'] '+tr.querySelector('[data-f=desc]').value;
     r.amount=parseFloat(tr.querySelector('[data-f=amt]').value)||0;
@@ -97,41 +94,34 @@ function syncDOM(){
 }
 
 async function loadData(){
-  const{year,month}=getYM(); CY=year; CM=month;
-  // Load existing data — do NOT auto-seed here, seeding is done on first Save
+  const{year,month}=getYM();CY=year;CM=month;
   let data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
-
-  // Only seed Inbal & Aviv if this month has zero income rows at all
-  const hasAnyIncome=data.some(r=>r.type.startsWith('income'));
-  if(!hasAnyIncome){
+  if(!data.some(r=>r.type.startsWith('income'))){
     await FF.post('/api/transactions',{year,month,type:'income_salary',description:'Inbal Salary',amount:0});
     await FF.post('/api/transactions',{year,month,type:'income_salary',description:'Aviv Salary',amount:0});
     data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
   }
-
   rows=data.map(r=>({...r,_del:false,_new:false}));
-  buildTables(); updateKPIs(); buildCatChart();
+  buildTables();updateKPIs();buildCatChart();
   await buildTrendChart();
 }
 
 function buildTables(){buildIncome();buildExpenses();}
 
 function buildIncome(){
-  const tb=document.getElementById('income-tbody');
-  tb.innerHTML='';
+  const tb=document.getElementById('income-tbody');tb.innerHTML='';
   rows.filter(r=>!r._del&&r.type.startsWith('income')).forEach(r=>{
-    const tr=document.createElement('tr');
-    tr.dataset.rowid=r.id;
+    const tr=document.createElement('tr');tr.dataset.rowid=r.id;
     tr.innerHTML=`
       <td><select class="editable-cell" data-f="type" style="width:95px">
         <option value="income_salary"${r.type==='income_salary'?' selected':''}>Salary</option>
         <option value="income_other"${r.type==='income_other'?' selected':''}>Other</option>
       </select></td>
       <td><input class="editable-cell" data-f="desc" value="${esc(r.description)}"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
+        onkeydown="if(event.key==='Enter'){event.preventDefault();saveAll();}" /></td>
       <td><input class="editable-cell mono" data-f="amt" type="number" value="${r.amount||''}" placeholder="0"
         style="text-align:right;width:160px" oninput="liveUpdate()"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
+        onkeydown="if(event.key==='Enter'){event.preventDefault();saveAll();}" /></td>
       <td><button class="btn btn-danger btn-icon" onclick="delRow(${r.id})">&#x2715;</button></td>`;
     tb.appendChild(tr);
   });
@@ -139,53 +129,38 @@ function buildIncome(){
 }
 
 function buildExpenses(){
-  const ec=document.getElementById('exp-container');
-  ec.innerHTML='';
+  const ec=document.getElementById('exp-container');ec.innerHTML='';
   const expRows=rows.filter(r=>!r._del&&r.type==='expense');
-  if(!expRows.length){ec.innerHTML='<div class="empty-state"><p>No expenses yet. Select a category above and click + Add Row.</p></div>';calcTotals();return;}
+  if(!expRows.length){ec.innerHTML='<div class="empty-state"><p>No expenses yet.</p></div>';calcTotals();return;}
   const groups={};
   expRows.forEach(r=>{const c=getCat(r.description);(groups[c]=groups[c]||[]).push(r);});
   Object.keys(groups).sort().forEach(cat=>{
     const cr=groups[cat],col=CATS[cat]||'#9aa0bb';
-    const sec=document.createElement('div');
-    sec.style.marginBottom='2px';
-    const rowsHtml=cr.map(r=>`<tr data-rowid="${r.id}" data-cat="${cat}">
-      <td style="padding-left:28px"><input class="editable-cell" data-f="desc" value="${esc(getDesc(r.description))}"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" style="width:100%" /></td>
-      <td style="width:170px;text-align:right"><input class="editable-cell mono" data-f="amt" type="number"
-        value="${r.amount||''}" placeholder="0" style="text-align:right;width:150px" oninput="liveUpdate()"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();moveNext(this);}" /></td>
-      <td style="width:40px"><button class="btn btn-danger btn-icon" onclick="delRow(${r.id})">&#x2715;</button></td>
-    </tr>`).join('');
+    const sec=document.createElement('div');sec.style.marginBottom='2px';
     sec.innerHTML=`
       <div style="display:flex;align-items:center;padding:7px 14px;background:var(--bg3);border-top:2px solid ${col}">
         <span style="width:10px;height:10px;background:${col};border-radius:2px;display:inline-block;margin-right:10px"></span>
         <span style="font-size:11px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;flex:1">${cat}</span>
         <span style="font-family:'DM Mono',monospace;font-size:13px;color:${col}">${FF.ils(cr.reduce((s,r)=>s+(+r.amount||0),0))}</span>
       </div>
-      <table style="width:100%"><tbody>${rowsHtml}</tbody></table>`;
+      <table style="width:100%"><tbody>${cr.map(r=>`<tr data-rowid="${r.id}" data-cat="${cat}">
+        <td style="padding-left:28px"><input class="editable-cell" data-f="desc" value="${esc(getDesc(r.description))}"
+          style="width:100%" onkeydown="if(event.key==='Enter'){event.preventDefault();saveAll();}" /></td>
+        <td style="width:170px;text-align:right"><input class="editable-cell mono" data-f="amt" type="number"
+          value="${r.amount||''}" placeholder="0" style="text-align:right;width:150px" oninput="liveUpdate()"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();saveAll();}" /></td>
+        <td style="width:40px"><button class="btn btn-danger btn-icon" onclick="delRow(${r.id})">&#x2715;</button></td>
+      </tr>`).join('')}</tbody></table>`;
     ec.appendChild(sec);
   });
   calcTotals();
 }
 
-function moveNext(el){
-  const all=Array.from(document.querySelectorAll('.editable-cell'));
-  const i=all.indexOf(el);
-  if(i<all.length-1)all[i+1].focus();
-}
-
-function liveUpdate(){
-  syncDOM();
-  updateKPIs();
-  calcTotals();
-}
+function liveUpdate(){syncDOM();updateKPIs();calcTotals();}
 
 function calcTotals(){
-  const it=rows.filter(r=>!r._del&&r.type.startsWith('income')).reduce((s,r)=>s+(+r.amount||0),0);
-  document.getElementById('income-total').textContent=FF.ils(it);
-  const et=rows.filter(r=>!r._del&&r.type==='expense').reduce((s,r)=>s+(+r.amount||0),0);
-  document.getElementById('exp-total').textContent=FF.ils(et);
+  document.getElementById('income-total').textContent=FF.ils(rows.filter(r=>!r._del&&r.type.startsWith('income')).reduce((s,r)=>s+(+r.amount||0),0));
+  document.getElementById('exp-total').textContent=FF.ils(rows.filter(r=>!r._del&&r.type==='expense').reduce((s,r)=>s+(+r.amount||0),0));
 }
 
 function updateKPIs(){
@@ -198,7 +173,7 @@ function updateKPIs(){
   document.getElementById('kpi-other').textContent=FF.ils(oth);
   document.getElementById('kpi-expenses').textContent=FF.ils(exp);
   const el=document.getElementById('kpi-savings');
-  el.textContent=FF.ils(sav); el.className='kpi-value '+(sav>=0?'green':'red');
+  el.textContent=FF.ils(sav);el.className='kpi-value '+(sav>=0?'green':'red');
 }
 
 let tempId=-1;
@@ -215,8 +190,7 @@ function addExpense(){
   setTimeout(()=>{const a=document.querySelectorAll('#exp-container [data-f=amt]');if(a.length)a[a.length-1].focus();},60);
 }
 function delRow(id){
-  syncDOM();
-  const r=rowById(id);if(r)r._del=true;
+  syncDOM();const r=rowById(id);if(r)r._del=true;
   buildTables();updateKPIs();buildCatChart();
 }
 
@@ -230,26 +204,21 @@ async function saveAll(){
       await FF.post('/api/transactions',{year:CY,month:CM,type:r.type,description:r.description,amount:r.amount||0});
     for(const r of rows.filter(x=>!x._del&&!x._new))
       await FF.put(`/api/transactions/${r.id}`,{type:r.type,description:r.description,amount:r.amount||0});
-    FF.toast('All saved!');
-    await loadData(); // reload fresh + updates trend chart
+    FF.toast('Saved!');
+    await loadData();
   }catch(e){FF.toast('Error: '+e.message,'error');}
   btn.textContent='&#10003; Save All';btn.disabled=false;
 }
 
 function buildCatChart(){
   const groups={};
-  rows.filter(r=>!r._del&&r.type==='expense').forEach(r=>{
-    const c=getCat(r.description);groups[c]=(groups[c]||0)+(+r.amount||0);
-  });
+  rows.filter(r=>!r._del&&r.type==='expense').forEach(r=>{const c=getCat(r.description);groups[c]=(groups[c]||0)+(+r.amount||0);});
   const cats=Object.keys(groups);
   const ctx=document.getElementById('cat-chart').getContext('2d');
   if(cChart)cChart.destroy();
   if(!cats.length){cChart=null;return;}
-  cChart=new Chart(ctx,{type:'doughnut',
-    data:{labels:cats,datasets:[{data:cats.map(c=>groups[c]),
-      backgroundColor:cats.map(c=>CATS[c]||'#9aa0bb'),borderWidth:2,borderColor:'#1f2434'}]},
-    options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{position:'right',labels:{font:{size:11},boxWidth:12}}}}});
+  cChart=new Chart(ctx,{type:'doughnut',data:{labels:cats,datasets:[{data:cats.map(c=>groups[c]),backgroundColor:cats.map(c=>CATS[c]||'#9aa0bb'),borderWidth:2,borderColor:'#1f2434'}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:11},boxWidth:12}}}}});
 }
 
 async function buildTrendChart(){
@@ -260,10 +229,8 @@ async function buildTrendChart(){
   tChart=new Chart(ctx,{type:'line',
     data:{labels:keys.map(k=>{const[y,m]=k.split('-');return FF.monthLabel(+y,+m);}),
       datasets:[
-        {label:'Income',data:keys.map(k=>(summary[k].salary||0)+(summary[k].other_income||0)),
-         borderColor:FF.colors.green,tension:0.4,fill:false,pointRadius:3},
-        {label:'Expenses',data:keys.map(k=>summary[k].expenses||0),
-         borderColor:FF.colors.red,tension:0.4,fill:false,pointRadius:3}]},
+        {label:'Income',data:keys.map(k=>(summary[k].salary||0)+(summary[k].other_income||0)),borderColor:FF.colors.green,tension:0.4,fill:false,pointRadius:3},
+        {label:'Expenses',data:keys.map(k=>summary[k].expenses||0),borderColor:FF.colors.red,tension:0.4,fill:false,pointRadius:3}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top'}},
       scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(0)+'k'}}}}});
 }
