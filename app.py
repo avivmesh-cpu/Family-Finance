@@ -37,9 +37,13 @@ if DATABASE_URL:
             last_err = None
             for port in ports_to_try:
                 try:
+                    import ssl
+                    ssl_ctx = ssl.create_default_context()
+                    ssl_ctx.check_hostname = False
+                    ssl_ctx.verify_mode = ssl.CERT_NONE
                     self._conn = pg8000.native.Connection(
                         host=_host, port=port, database=_dbname,
-                        user=_user, password=_password, ssl_context=True)
+                        user=_user, password=_password, ssl_context=ssl_ctx)
                     return
                 except Exception as e:
                     last_err = e
