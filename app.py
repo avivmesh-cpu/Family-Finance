@@ -145,22 +145,28 @@ def logout(): session.clear(); return redirect(url_for('login'))
 def health(): return jsonify({'status':'ok','db':'postgresql' if PG else 'sqlite'})
 
 # ── Pages ───────────────────────────────────────────────────────
-@app.route('/') @auth_required
+@app.route('/')
+@auth_required
 def index(): return render_template('index.html')
 
-@app.route('/income-spending') @auth_required
+@app.route('/income-spending')
+@auth_required
 def income_spending(): return render_template('income_spending.html')
 
-@app.route('/assets') @auth_required
+@app.route('/assets')
+@auth_required
 def assets(): return render_template('assets.html')
 
-@app.route('/mortgage') @auth_required
+@app.route('/mortgage')
+@auth_required
 def mortgage(): return render_template('mortgage.html')
 
-@app.route('/stocks') @auth_required
+@app.route('/stocks')
+@auth_required
 def stocks(): return render_template('stocks.html')
 
-@app.route('/daughter-savings') @auth_required
+@app.route('/daughter-savings')
+@auth_required
 def daughter_savings(): return render_template('daughter_savings.html')
 
 
