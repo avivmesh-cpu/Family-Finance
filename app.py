@@ -40,9 +40,15 @@ if DATABASE_URL:
         return [dict(zip(cols, r)) for r in rows] if rows and cols else []
 
     def run(conn, sql, params=()):
-        """Run SQL with no result needed."""
+        """Run a write SQL statement with commit."""
         sql = sql.replace('?', '%s')
-        conn.run(sql, *params)
+        conn.run('BEGIN')
+        try:
+            conn.run(sql, *params)
+            conn.run('COMMIT')
+        except Exception as e:
+            conn.run('ROLLBACK')
+            raise e
 
     def lastid(conn):
         return conn.run('SELECT lastval()')[0][0]
@@ -50,6 +56,10 @@ if DATABASE_URL:
     def close_db(conn):
         try: conn.close()
         except: pass
+
+    def run_ddl(conn, sql):
+        """Run DDL (CREATE TABLE etc) - no transaction wrapper needed."""
+        conn.run(sql)
 
     PG = True
 
@@ -77,6 +87,10 @@ else:
     def close_db(conn):
         conn.close()
 
+    def run_ddl(conn, sql):
+        conn.execute(sql)
+        conn.commit()
+
     PG = False
 
 TBL = 'transactions' if PG else '"transaction"'
@@ -91,10 +105,15 @@ def init_db():
         f'CREATE TABLE IF NOT EXISTS stock_holding (id {ID_TYPE}, symbol TEXT NOT NULL, purchase_price REAL NOT NULL, quantity REAL NOT NULL, purchase_date TEXT DEFAULT \'\', notes TEXT DEFAULT \'\')',
         f'CREATE TABLE IF NOT EXISTS daughter_investment (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, ils_invested REAL NOT NULL, usd_ils_rate REAL NOT NULL, ivv_price_usd REAL NOT NULL, shares_purchased REAL NOT NULL, cumulative_shares REAL NOT NULL)',
     ]:
-        run(conn, sql)
+        run_ddl(conn, sql)
     close_db(conn)
 
 init_db()
+
+@app.errorhandler(Exception)
+def handle_error(e):
+    import traceback
+    return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
 
 # ── Auth ──────────────────────────────────────────────────────────
 def auth_required(f):
