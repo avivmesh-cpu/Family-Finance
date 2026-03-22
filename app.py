@@ -38,7 +38,10 @@ if DATABASE_URL:
         """Run SELECT, return list of dicts."""
         sql = sql.replace('?', '%s')
         cur = conn.cursor()
-        cur.execute(sql, params if params else None)
+        if params:
+            cur.execute(sql, list(params))
+        else:
+            cur.execute(sql)
         cols = [d[0] for d in cur.description] if cur.description else []
         rows = cur.fetchall() or []
         cur.close()
@@ -48,7 +51,10 @@ if DATABASE_URL:
         """Run INSERT/UPDATE/DELETE."""
         sql = sql.replace('?', '%s')
         cur = conn.cursor()
-        cur.execute(sql, params if params else None)
+        if params:
+            cur.execute(sql, list(params))
+        else:
+            cur.execute(sql)
         cur.close()
 
     def lastid(conn):
@@ -63,7 +69,6 @@ if DATABASE_URL:
         except: pass
 
     def run_ddl(conn, sql):
-        sql = sql.replace('?', '%s')
         cur = conn.cursor()
         cur.execute(sql)
         cur.close()
