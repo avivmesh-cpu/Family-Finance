@@ -32,23 +32,34 @@ if DATABASE_URL:
             host=_host, port=_port, database=_db,
             user=_user, password=_pw, ssl_context=_ssl())
 
-    def q(conn, sql, params=()):
-        """Run SQL, return list of dicts."""
+    import re as _re
+
+    def _numbered(sql, params):
+        """Convert ? or %s placeholders to $1, $2, ... for pg8000."""
         sql = sql.replace('?', '%s')
-        rows = conn.run(sql, *params)
+        count = [0]
+        def rep(m):
+            count[0] += 1
+            return f'${count[0]}'
+        return _re.sub(r'%s', rep, sql), list(params)
+
+    def q(conn, sql, params=()):
+        """Run SELECT, return list of dicts."""
+        if params:
+            sql, p = _numbered(sql, params)
+            rows = conn.run(sql, *p)
+        else:
+            rows = conn.run(sql)
         cols = [c['name'] for c in (conn.columns or [])]
         return [dict(zip(cols, r)) for r in rows] if rows and cols else []
 
     def run(conn, sql, params=()):
-        """Run a write SQL statement with commit."""
-        sql = sql.replace('?', '%s')
-        conn.run('BEGIN')
-        try:
-            conn.run(sql, *params)
-            conn.run('COMMIT')
-        except Exception as e:
-            conn.run('ROLLBACK')
-            raise e
+        """Run INSERT/UPDATE/DELETE."""
+        if params:
+            sql, p = _numbered(sql, params)
+            conn.run(sql, *p)
+        else:
+            conn.run(sql)
 
     def lastid(conn):
         return conn.run('SELECT lastval()')[0][0]
@@ -58,7 +69,6 @@ if DATABASE_URL:
         except: pass
 
     def run_ddl(conn, sql):
-        """Run DDL (CREATE TABLE etc) - no transaction wrapper needed."""
         conn.run(sql)
 
     PG = True
@@ -375,10 +385,17 @@ def fetch_ivv_prices():
         iurl = 'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d'
         rurl = 'https://query1.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&range=5d'
     def fp(url):
-        rd = req_lib.get(url,timeout=10,headers=h).json()['chart']['result'][0]
-        closes = [c for c in rd['indicators']['quote'][0].get('close',[]) if c]
-        if closes: return closes[-1]
-        m = rd['meta']; return m.get('regularMarketPrice') or m.get('chartPreviousClose') or m.get('previousClose')
+        rd = req_lib.get(url, timeout=10, headers=h).json()['chart']['result'][0]
+        meta = rd['meta']
+        # Try closes array first
+        closes = [c for c in rd['indicators']['quote'][0].get('close', []) if c is not None]
+        if closes:
+            return closes[-1]
+        # Fall back to meta price fields
+        return (meta.get('regularMarketPrice') or
+                meta.get('chartPreviousClose') or
+                meta.get('previousClose') or
+                meta.get('fiftyTwoWeekHigh'))
     result = {}
     try: result['ivv_price'] = fp(iurl)
     except Exception as e: result['ivv_price'] = None; result['ivv_error'] = str(e)
