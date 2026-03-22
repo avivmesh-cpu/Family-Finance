@@ -326,13 +326,28 @@ def delete_stock(sid):
     return jsonify({'status':'ok'})
 
 def _yahoo(sym):
-    h = {'User-Agent':'Mozilla/5.0','Referer':'https://finance.yahoo.com'}
-    rd = req_lib.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d",
-                     timeout=10, headers=h).json()['chart']['result'][0]
-    closes = [c for c in rd['indicators']['quote'][0].get('close',[]) if c]
-    if closes: return closes[-1]
-    m = rd['meta']
-    return m.get('regularMarketPrice') or m.get('chartPreviousClose') or m.get('previousClose')
+    """Fetch current price for a symbol from Yahoo Finance."""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Origin': 'https://finance.yahoo.com',
+        'Referer': 'https://finance.yahoo.com/quote/' + sym,
+    }
+    # Try query1 then query2
+    for host in ['query1', 'query2']:
+        try:
+            url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d'
+            resp = req_lib.get(url, timeout=10, headers=headers)
+            rd = resp.json()['chart']['result'][0]
+            closes = [c for c in rd['indicators']['quote'][0].get('close', []) if c is not None]
+            if closes: return closes[-1]
+            meta = rd['meta']
+            price = meta.get('regularMarketPrice') or meta.get('chartPreviousClose') or meta.get('previousClose')
+            if price: return price
+        except Exception:
+            continue
+    raise Exception(f'No price found for {sym}')
 
 @app.route('/api/stocks/prices', methods=['GET'])
 @auth_required
@@ -379,37 +394,65 @@ def add_daughter_entry():
 @auth_required
 def fetch_ivv_prices():
     import calendar; from datetime import date as dt
-    h = {'User-Agent':'Mozilla/5.0 Chrome/122','Referer':'https://finance.yahoo.com'}
-    yr = request.args.get('year',type=int); mo = request.args.get('month',type=int)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Origin': 'https://finance.yahoo.com',
+        'Referer': 'https://finance.yahoo.com',
+    }
+    yr = request.args.get('year', type=int)
+    mo = request.args.get('month', type=int)
     if yr and mo:
-        td = min(15,calendar.monthrange(yr,mo)[1]); target = dt(yr,mo,td); epoch = dt(1970,1,1)
-        p1 = int((target-epoch).days)*86400 - 5*86400
-        p2 = int((target-epoch).days)*86400 + 10*86400
-        iurl = f'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&period1={p1}&period2={p2}'
-        rurl = f'https://query1.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&period1={p1}&period2={p2}'
+        td = min(15, calendar.monthrange(yr, mo)[1])
+        target = dt(yr, mo, td); epoch = dt(1970, 1, 1)
+        p1 = int((target - epoch).days) * 86400 - 5 * 86400
+        p2 = int((target - epoch).days) * 86400 + 10 * 86400
+        ivv_urls = [
+            f'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&period1={p1}&period2={p2}',
+            f'https://query2.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&period1={p1}&period2={p2}',
+            'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=1mo',
+        ]
+        ils_urls = [
+            f'https://query1.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&period1={p1}&period2={p2}',
+            f'https://query2.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&period1={p1}&period2={p2}',
+        ]
     else:
-        iurl = 'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d'
-        rurl = 'https://query1.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&range=5d'
-    def fp(url):
-        rd = req_lib.get(url, timeout=10, headers=h).json()['chart']['result'][0]
-        meta = rd['meta']
-        # Try closes array first
-        closes = [c for c in rd['indicators']['quote'][0].get('close', []) if c is not None]
-        if closes:
-            return closes[-1]
-        # Fall back to meta price fields
-        return (meta.get('regularMarketPrice') or
-                meta.get('chartPreviousClose') or
-                meta.get('previousClose') or
-                meta.get('fiftyTwoWeekHigh'))
+        ivv_urls = [
+            'https://query1.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d',
+            'https://query2.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&range=5d',
+        ]
+        ils_urls = [
+            'https://query1.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&range=5d',
+            'https://query2.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&range=5d',
+        ]
+
+    def fp(urls):
+        last_err = None
+        for url in urls:
+            try:
+                rd = req_lib.get(url, timeout=10, headers=headers).json()['chart']['result'][0]
+                closes = [c for c in rd['indicators']['quote'][0].get('close', []) if c is not None]
+                if closes: return closes[-1]
+                meta = rd['meta']
+                price = (meta.get('regularMarketPrice') or meta.get('chartPreviousClose') or meta.get('previousClose'))
+                if price: return price
+            except Exception as e:
+                last_err = e
+        raise last_err or Exception('No price found')
+
     result = {}
-    try: result['ivv_price'] = fp(iurl)
+    try: result['ivv_price'] = fp(ivv_urls)
     except Exception as e: result['ivv_price'] = None; result['ivv_error'] = str(e)
-    try: result['usd_ils_rate'] = fp(rurl)
+
+    try: result['usd_ils_rate'] = fp(ils_urls)
     except: result['usd_ils_rate'] = None
+
+    # Always fallback to open.er-api.com for USD/ILS
     if not result.get('usd_ils_rate'):
-        try: result['usd_ils_rate'] = req_lib.get('https://open.er-api.com/v6/latest/USD',timeout=10).json()['rates']['ILS']
+        try: result['usd_ils_rate'] = req_lib.get('https://open.er-api.com/v6/latest/USD', timeout=10).json()['rates']['ILS']
         except: result['usd_ils_rate'] = None
+
     return jsonify(result)
 
 @app.route('/api/daughter/<int:did>', methods=['DELETE'])
