@@ -77,22 +77,6 @@ function getCat(d){const m=d.match(/^\[([^\]]+)\]/);return m?m[1]:'Other';}
 function getDesc(d){return d.replace(/^\[[^\]]+\]\s*/,'');}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function rowById(id){return rows.find(r=>r.id===id);}
-
-function syncDOM(){
-  document.querySelectorAll('#income-tbody tr[data-rowid]').forEach(tr=>{
-    const r=rowById(+tr.dataset.rowid);if(!r)return;
-    r.type=tr.querySelector('[data-f=type]').value;
-    r.description=tr.querySelector('[data-f=desc]').value;
-    r.amount=parseFloat(tr.querySelector('[data-f=amt]').value)||0;
-  });
-  document.querySelectorAll('#exp-container tr[data-rowid]').forEach(tr=>{
-    const r=rowById(+tr.dataset.rowid);if(!r)return;
-    const cat=tr.dataset.cat||'Other';
-    r.description='['+cat+'] '+tr.querySelector('[data-f=desc]').value;
-    r.amount=parseFloat(tr.querySelector('[data-f=amt]').value)||0;
-  });
-}
-
 // Fixed monthly expenses — seeded automatically for every new month
 const FIXED_EXPENSES = [
   // Housing
@@ -194,28 +178,40 @@ function buildExpenses(){
   const ec=document.getElementById('exp-container');ec.innerHTML='';
   const expRows=rows.filter(r=>!r._del&&r.type==='expense');
   if(!expRows.length){ec.innerHTML='<div class="empty-state"><p>No expenses yet.</p></div>';calcTotals();return;}
-  const groups={};
-  expRows.forEach(r=>{const c=getCat(r.description);(groups[c]=groups[c]||[]).push(r);});
-  Object.keys(groups).sort().forEach(cat=>{
-    const cr=groups[cat],col=CATS[cat]||'#9aa0bb';
-    const sec=document.createElement('div');sec.style.marginBottom='2px';
-    sec.innerHTML=`
-      <div style="display:flex;align-items:center;padding:7px 14px;background:var(--bg3);border-top:2px solid ${col}">
-        <span style="width:10px;height:10px;background:${col};border-radius:2px;display:inline-block;margin-right:10px"></span>
-        <span style="font-size:11px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;flex:1">${cat}</span>
-        <span style="font-family:'DM Mono',monospace;font-size:13px;color:${col}">${FF.ils(cr.reduce((s,r)=>s+(+r.amount||0),0))}</span>
-      </div>
-      <table style="width:100%"><tbody>${cr.map(r=>`<tr data-rowid="${r.id}" data-cat="${cat}">
-        <td style="padding-left:28px"><input class="editable-cell" data-f="desc" value="${esc(getDesc(r.description))}"
-          style="width:100%" onkeydown="if(event.key==='Enter'){event.preventDefault();saveAll();}" /></td>
-        <td style="width:170px;text-align:right"><input class="editable-cell mono" data-f="amt" type="number"
-          value="${r.amount||''}" placeholder="0" style="text-align:right;width:150px" oninput="liveUpdate()"
-          onkeydown="if(event.key==='Enter'){event.preventDefault();saveAll();}" /></td>
-        <td style="width:40px"><button class="btn btn-danger btn-icon" onclick="delRow(${r.id})">&#x2715;</button></td>
-      </tr>`).join('')}</tbody></table>`;
-    ec.appendChild(sec);
+  const table=document.createElement('table');table.style.width='100%';
+  table.innerHTML='<thead><tr><th>Description</th><th style="width:180px;text-align:right">Amount (&#8362;)</th><th style="width:40px"></th></tr></thead>';
+  const tbody=document.createElement('tbody');
+  expRows.forEach(r=>{
+    const tr=document.createElement('tr');tr.dataset.rowid=r.id;
+    tr.innerHTML=`
+      <td><input class="editable-cell" data-f="desc" value="${esc(getDesc(r.description))}"
+        style="width:100%" onkeydown="if(event.key==='Enter'){event.preventDefault();saveAll();}" /></td>
+      <td><input class="editable-cell mono" data-f="amt" type="number"
+        value="${r.amount||''}" placeholder="0" style="text-align:right;width:160px" oninput="liveUpdate()"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();saveAll();}" /></td>
+      <td><button class="btn btn-danger btn-icon" onclick="delRow(${r.id})">&#x2715;</button></td>`;
+    tbody.appendChild(tr);
   });
+  table.appendChild(tbody);
+  ec.appendChild(table);
   calcTotals();
+}
+
+function syncDOM(){
+  document.querySelectorAll('#income-tbody tr[data-rowid]').forEach(tr=>{
+    const r=rowById(+tr.dataset.rowid);if(!r)return;
+    r.type=tr.querySelector('[data-f=type]').value;
+    r.description=tr.querySelector('[data-f=desc]').value;
+    r.amount=parseFloat(tr.querySelector('[data-f=amt]').value)||0;
+  });
+  document.querySelectorAll('#exp-container tr[data-rowid]').forEach(tr=>{
+    const r=rowById(+tr.dataset.rowid);if(!r)return;
+    const descVal=tr.querySelector('[data-f=desc]').value;
+    // Keep the [Cat] prefix but update the description part
+    const cat=getCat(r.description);
+    r.description='['+cat+'] '+descVal;
+    r.amount=parseFloat(tr.querySelector('[data-f=amt]').value)||0;
+  });
 }
 
 function liveUpdate(){syncDOM();updateKPIs();calcTotals();}
