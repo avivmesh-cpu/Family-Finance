@@ -154,6 +154,31 @@ def health(): return jsonify({'status':'ok','db':'pg' if PG else 'sqlite','versi
 @app.route('/api/ping')
 def ping(): return jsonify({'pong': True, 'stock_routes': [str(r) for r in app.url_map.iter_rules() if 'stock' in str(r)]})
 
+@app.route('/api/debug-yahoo/<path:symbol>')
+@auth_required
+def debug_yahoo(symbol):
+    import traceback
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Origin': 'https://finance.yahoo.com',
+        'Referer': 'https://finance.yahoo.com/quote/' + symbol,
+    }
+    result = {}
+    for host in ['query1', 'query2']:
+        try:
+            url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{symbol.upper()}?interval=1d&range=5d'
+            resp = req_lib.get(url, timeout=10, headers=headers)
+            result[host] = {
+                'status': resp.status_code,
+                'meta': resp.json()['chart']['result'][0]['meta'],
+                'closes': [c for c in resp.json()['chart']['result'][0]['indicators']['quote'][0].get('close',[]) if c is not None][-3:]
+            }
+        except Exception as e:
+            result[host] = {'error': str(e), 'trace': traceback.format_exc()}
+    return jsonify(result)
+
 # ── Pages ─────────────────────────────────────────────────────────
 @app.route('/')
 @auth_required
