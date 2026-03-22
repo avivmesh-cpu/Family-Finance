@@ -34,20 +34,17 @@ if DATABASE_URL:
 
     import re as _re
 
-    def _numbered(sql, params):
-        """Convert ? or %s placeholders to $1, $2, ... for pg8000."""
-        sql = sql.replace('?', '%s')
+    def _pg(sql, params):
+        """Convert ? placeholders to $1,$2,... for pg8000."""
         count = [0]
-        def rep(m):
-            count[0] += 1
-            return f'${count[0]}'
-        return _re.sub(r'%s', rep, sql), list(params)
+        def rep(m): count[0] += 1; return f'${count[0]}'
+        return _re.sub(r'\?', rep, sql), list(params)
 
     def q(conn, sql, params=()):
         """Run SELECT, return list of dicts."""
         if params:
-            sql, p = _numbered(sql, params)
-            rows = conn.run(sql, *p)
+            sql, p = _pg(sql, params)
+            rows = conn.run(sql, parameters=p)
         else:
             rows = conn.run(sql)
         cols = [c['name'] for c in (conn.columns or [])]
@@ -56,8 +53,8 @@ if DATABASE_URL:
     def run(conn, sql, params=()):
         """Run INSERT/UPDATE/DELETE."""
         if params:
-            sql, p = _numbered(sql, params)
-            conn.run(sql, *p)
+            sql, p = _pg(sql, params)
+            conn.run(sql, parameters=p)
         else:
             conn.run(sql)
 
