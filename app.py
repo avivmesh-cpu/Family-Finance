@@ -11,7 +11,7 @@ DATABASE_URL = os.environ.get('DATABASE_URL', '')
 
 # ── Database ─────────────────────────────────────────────────────
 if DATABASE_URL:
-    import pg8000.native, ssl as ssl_mod
+    import pg8000, pg8000.dbapi, ssl as ssl_mod
     if DATABASE_URL.startswith('postgres://'):
         DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
     _u = DATABASE_URL.replace('postgresql://', '')
@@ -28,53 +28,42 @@ if DATABASE_URL:
         return ctx
 
     def get_db():
-        return pg8000.native.Connection(
+        conn = pg8000.dbapi.connect(
             host=_host, port=_port, database=_db,
             user=_user, password=_pw, ssl_context=_ssl())
-
-    import re as _re
-
-    def _pg(sql, params):
-        """Convert ? placeholders to $1,$2,... and return numbered params dict."""
-        count = [0]
-        def rep(m): count[0] += 1; return f'${count[0]}'
-        sql = _re.sub(r'\?', rep, sql)
-        # pg8000 native expects params as keyword args named by position
-        # e.g. conn.run("SELECT $1", **{"1": val})  -- but this varies by version
-        # Safest: pass as a tuple to 'parameters' positional arg (3rd arg after stream)
-        return sql, list(params)
+        conn.autocommit = True
+        return conn
 
     def q(conn, sql, params=()):
         """Run SELECT, return list of dicts."""
-        if params:
-            sql, p = _pg(sql, params)
-            # pg8000 native: run(operation, stream=None, types=None, **kwargs)
-            # kwargs are the parameter values named as their position number
-            kwargs = {str(i+1): v for i, v in enumerate(p)}
-            rows = conn.run(sql, **kwargs)
-        else:
-            rows = conn.run(sql)
-        cols = [c['name'] for c in (conn.columns or [])]
-        return [dict(zip(cols, r)) for r in rows] if rows and cols else []
+        cur = conn.cursor()
+        cur.execute(sql, params if params else None)
+        cols = [d[0] for d in cur.description] if cur.description else []
+        rows = cur.fetchall() or []
+        cur.close()
+        return [dict(zip(cols, r)) for r in rows]
 
     def run(conn, sql, params=()):
         """Run INSERT/UPDATE/DELETE."""
-        if params:
-            sql, p = _pg(sql, params)
-            kwargs = {str(i+1): v for i, v in enumerate(p)}
-            conn.run(sql, **kwargs)
-        else:
-            conn.run(sql)
+        cur = conn.cursor()
+        cur.execute(sql, params if params else None)
+        cur.close()
 
     def lastid(conn):
-        return conn.run('SELECT lastval()')[0][0]
+        cur = conn.cursor()
+        cur.execute('SELECT lastval()')
+        val = cur.fetchone()[0]
+        cur.close()
+        return val
 
     def close_db(conn):
         try: conn.close()
         except: pass
 
     def run_ddl(conn, sql):
-        conn.run(sql)
+        cur = conn.cursor()
+        cur.execute(sql)
+        cur.close()
 
     PG = True
 
