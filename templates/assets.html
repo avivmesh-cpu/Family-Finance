@@ -129,7 +129,7 @@ function buildTable(accountRows) {
       '<td style="text-align:right">' +
         '<input class="editable-cell mono" data-f="balance" type="number" value="' + (a.balance || '') + '"' +
           ' placeholder="0" style="text-align:right;width:180px" oninput="liveUpdate()"' +
-          ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();moveNext(this);}" />' +
+          ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();liveUpdate();saveAll();}" />' +
       '</td>';
     tb.appendChild(tr);
   });
@@ -140,12 +140,18 @@ function liveUpdate() {
   const data = getTableData();
   updateKPIs(data);
   calcTotal();
+  buildAllocChart(data);
 }
 
 function moveNext(el) {
   const all = Array.from(document.querySelectorAll('[data-f=balance]'));
   const i = all.indexOf(el);
-  if (i < all.length - 1) all[i + 1].focus();
+  if (i < all.length - 1) {
+    all[i + 1].focus();
+  } else {
+    // Last field — save automatically
+    saveAll();
+  }
 }
 
 function calcTotal() {

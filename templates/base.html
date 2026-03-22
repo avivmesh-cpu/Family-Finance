@@ -116,6 +116,9 @@ select.editable-cell option{background:var(--surface)}
       <a href="/income-spending" class="nav-item {% if '/income' in request.path %}active{% endif %}">
         <span class="nav-icon">&#8644;</span> Income &amp; Spending
       </a>
+      <a href="/expense-tracker" class="nav-item {% if '/expense-tracker' in request.path %}active{% endif %}">
+        <span class="nav-icon">&#9783;</span> Expense Tracker
+      </a>
       <a href="/assets" class="nav-item {% if '/assets' in request.path %}active{% endif %}">
         <span class="nav-icon">&#9678;</span> Total Assets
       </a>
@@ -127,9 +130,6 @@ select.editable-cell option{background:var(--surface)}
       </a>
       <a href="/daughter-savings" class="nav-item {% if '/daughter' in request.path %}active{% endif %}">
         <span class="nav-icon">&#10022;</span> Romi Savings
-      </a>
-      <a href="/expense-tracker" class="nav-item {% if '/expense-tracker' in request.path %}active{% endif %}">
-        <span class="nav-icon">&#9783;</span> Expense Tracker
       </a>
     </nav>
     <div class="sidebar-footer">
