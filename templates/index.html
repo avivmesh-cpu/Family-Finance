@@ -36,6 +36,21 @@
       <div class="kpi-value" id="kpi-daughter">—</div>
       <div class="kpi-sub">Cumulative shares</div>
     </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Bank Hapoalim</div>
+      <div class="kpi-value" id="kpi-hapoalim">—</div>
+      <div class="kpi-sub">Current balance</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Bank Mizrachi</div>
+      <div class="kpi-value" id="kpi-mizrachi">—</div>
+      <div class="kpi-sub">Current balance</div>
+    </div>
+    <div class="kpi-card blue">
+      <div class="kpi-label">IBI</div>
+      <div class="kpi-value blue" id="kpi-ibi">—</div>
+      <div class="kpi-sub">Investment account</div>
+    </div>
   </div>
 
   <div class="grid-2 mb-24">
@@ -109,6 +124,16 @@
   }
   const networth = latestBank + latestStocks - latestMortgage;
   document.getElementById('kpi-networth').textContent = FF.ils(networth);
+
+  // Bank & IBI individual balances
+  if (latestMonthKey) {
+    const [ly, lm] = latestMonthKey.split('-');
+    const latestMonthAssets = allAssets.filter(a => a.year===+ly && a.month===+lm);
+    const findBal = name => { const a = latestMonthAssets.find(a=>a.account_name===name); return a ? a.balance : 0; };
+    document.getElementById('kpi-hapoalim').textContent = FF.ils(findBal('Bank Hapoalim'));
+    document.getElementById('kpi-mizrachi').textContent = FF.ils(findBal('Bank Mizrachi'));
+    document.getElementById('kpi-ibi').textContent      = FF.ils(findBal('IBI'));
+  }
 
   if (daughter.length) {
     const last = daughter[daughter.length-1];

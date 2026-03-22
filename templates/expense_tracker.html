@@ -42,12 +42,13 @@
 let summaryData = {}, selectedExp = null, trendChart = null;
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-// Populate year picker
+// Populate year picker — default to current year
 const curY = new Date().getFullYear();
 const ySel = document.getElementById('year-picker');
 for(let y = curY; y >= curY - 4; y--){
   const o = document.createElement('option');
   o.value = y; o.textContent = y;
+  if(y === curY) o.selected = true;
   ySel.appendChild(o);
 }
 

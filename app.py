@@ -286,7 +286,34 @@ def add_asset():
             (d['year'], d['month'], d['account_name'], d['account_type'], float(d['balance'])))
     close_db(conn); return jsonify({'status':'ok'})
 
-@app.route('/api/assets/<int:aid>', methods=['DELETE'])
+@app.route('/api/assets/add-account', methods=['POST'])
+@auth_required
+def add_account_to_months():
+    """Add a new account to the current month and all future months that have data."""
+    d = request.json
+    name = d['account_name']; atype = d['account_type']
+    from_year = d['year']; from_month = d['month']
+    conn = get_db()
+    # Find all months >= from_month that already have asset data
+    all_months = q(conn, 'SELECT DISTINCT year, month FROM asset_snapshot ORDER BY year, month')
+    added = 0
+    for m in all_months:
+        if (m['year'], m['month']) >= (from_year, from_month):
+            ex = q(conn, 'SELECT id FROM asset_snapshot WHERE year=? AND month=? AND account_name=?',
+                   (m['year'], m['month'], name))
+            if not ex:
+                run(conn, 'INSERT INTO asset_snapshot (year,month,account_name,account_type,balance) VALUES (?,?,?,?,?)',
+                    (m['year'], m['month'], name, atype, 0))
+                added += 1
+    # Also add for current month if no data exists yet
+    ex = q(conn, 'SELECT id FROM asset_snapshot WHERE year=? AND month=? AND account_name=?',
+           (from_year, from_month, name))
+    if not ex:
+        run(conn, 'INSERT INTO asset_snapshot (year,month,account_name,account_type,balance) VALUES (?,?,?,?,?)',
+            (from_year, from_month, name, atype, 0))
+        added += 1
+    close_db(conn)
+    return jsonify({'status':'ok', 'added_to_months': added})
 @auth_required
 def delete_asset(aid):
     conn = get_db(); run(conn, 'DELETE FROM asset_snapshot WHERE id=?', (aid,)); close_db(conn)
@@ -338,10 +365,27 @@ def get_stocks():
 @app.route('/api/stocks', methods=['POST'])
 @auth_required
 def add_stock():
-    d = request.json; conn = get_db()
-    run(conn, 'INSERT INTO stock_holding (symbol,purchase_price,quantity,purchase_date,notes) VALUES (?,?,?,?,?)',
-        (d['symbol'].upper(), float(d['purchase_price']), float(d['quantity']),
-         d.get('purchase_date',''), d.get('notes','')))
+    d = request.json
+    sym = d['symbol'].upper().strip()
+    new_qty = float(d['quantity'])
+    new_price = float(d['purchase_price'])
+    conn = get_db()
+    existing = q(conn, 'SELECT * FROM stock_holding WHERE symbol=?', (sym,))
+    if existing:
+        # Merge: weighted average price, sum quantities
+        old_qty = sum(float(r['quantity']) for r in existing)
+        old_val = sum(float(r['quantity']) * float(r['purchase_price']) for r in existing)
+        total_qty = old_qty + new_qty
+        avg_price = (old_val + new_qty * new_price) / total_qty if total_qty else new_price
+        # Delete all existing rows for this symbol
+        for r in existing:
+            run(conn, 'DELETE FROM stock_holding WHERE id=?', (r['id'],))
+        # Insert one merged row
+        run(conn, 'INSERT INTO stock_holding (symbol,purchase_price,quantity,purchase_date,notes) VALUES (?,?,?,?,?)',
+            (sym, round(avg_price, 4), round(total_qty, 6), d.get('purchase_date',''), d.get('notes','')))
+    else:
+        run(conn, 'INSERT INTO stock_holding (symbol,purchase_price,quantity,purchase_date,notes) VALUES (?,?,?,?,?)',
+            (sym, new_price, new_qty, d.get('purchase_date',''), d.get('notes','')))
     close_db(conn); return jsonify({'status':'ok'})
 
 def _yahoo(sym):
