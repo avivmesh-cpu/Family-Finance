@@ -22,7 +22,7 @@
   </div>
 
   <div class="grid-2 mb-24">
-    <div class="card"><div class="card-title mb-16">Spending by Category</div><div class="chart-wrap"><canvas id="cat-chart"></canvas></div></div>
+    <div class="card"><div class="card-title mb-16">Spending by Category</div><div class="chart-wrap" style="height:340px"><canvas id="cat-chart"></canvas></div></div>
     <div class="card"><div class="card-title mb-16">12-Month Trend</div><div class="chart-wrap"><canvas id="trend-chart"></canvas></div></div>
   </div>
 
@@ -269,12 +269,20 @@ async function saveAll(){
 }
 
 function buildCatChart(){
-  // Only show expenses with amount > 0, labeled by description
   const expRows = rows.filter(r=>!r._del&&r.type==='expense'&&(+r.amount||0)>0);
-  const labels = expRows.map(r=>getDesc(r.description));
-  const data   = expRows.map(r=>+r.amount||0);
-  // Generate distinct colors cycling through palette
-  const palette=['#5b8df6','#4caf88','#c9a84c','#e05c6a','#9b7cf8','#4cc9c9','#f08c4b','#e87dbd','#7dc8e8','#a8d86e','#9aa0bb','#e8c96a','#5dcaa5','#d85a30','#185fa5'];
+  // Sort by amount descending, show top 12 + "Other"
+  expRows.sort((a,b)=>(+b.amount||0)-(+a.amount||0));
+  let labels, data;
+  if(expRows.length<=14){
+    labels = expRows.map(r=>getDesc(r.description));
+    data   = expRows.map(r=>+r.amount||0);
+  } else {
+    const top = expRows.slice(0,13);
+    const rest = expRows.slice(13).reduce((s,r)=>s+(+r.amount||0),0);
+    labels = [...top.map(r=>getDesc(r.description)), 'אחר'];
+    data   = [...top.map(r=>+r.amount||0), rest];
+  }
+  const palette=['#5b8df6','#4caf88','#c9a84c','#e05c6a','#9b7cf8','#4cc9c9','#f08c4b','#e87dbd','#7dc8e8','#a8d86e','#e8c96a','#5dcaa5','#d85a30','#9aa0bb'];
   const colors = labels.map((_,i)=>palette[i%palette.length]);
   const ctx=document.getElementById('cat-chart').getContext('2d');
   if(cChart)cChart.destroy();
@@ -282,7 +290,23 @@ function buildCatChart(){
   cChart=new Chart(ctx,{type:'doughnut',
     data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'#1f2434'}]},
     options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:10,padding:6}}}}});
+      plugins:{legend:{
+        position:'bottom',
+        labels:{font:{size:11},boxWidth:12,padding:8,
+          color:'#9aa0bb',
+          // Show value next to label
+          generateLabels(chart){
+            const ds=chart.data.datasets[0];
+            return chart.data.labels.map((label,i)=>({
+              text: label+' — '+FF.ils(ds.data[i]),
+              fillStyle: ds.backgroundColor[i],
+              strokeStyle: ds.backgroundColor[i],
+              lineWidth: 0, index: i,
+              fontColor: '#9aa0bb'
+            }));
+          }
+        }
+      }}}});
 }
 
 async function buildTrendChart(){

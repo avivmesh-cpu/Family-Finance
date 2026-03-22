@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}Expense Tracker{% endblock %}
+{% block page_title %}Expense Tracker{% endblock %}
+{% block page_subtitle %}Track each expense across 12 months{% endblock %}
+
+{% block content %}
+<div class="page-body">
+
+  <div class="month-bar">
+    <label>Year:</label>
+    <select id="year-picker" class="month-input" style="width:100px"></select>
+    <button class="btn btn-primary btn-sm" id="load-btn">Load</button>
+  </div>
+
+  <!-- KPI row -->
+  <div class="kpi-grid" id="kpi-row" style="margin-bottom:24px"></div>
+
+  <!-- Line chart for selected expense -->
+  <div class="card mb-24" id="chart-card" style="display:none">
+    <div class="flex-between mb-16">
+      <div>
+        <div class="card-title" id="chart-title">Expense Trend</div>
+        <div class="card-subtitle">12-month view</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="clearSelection()">&#x2715; Close</button>
+    </div>
+    <div class="chart-wrap"><canvas id="trend-canvas"></canvas></div>
+  </div>
+
+  <!-- Main table: expenses × months -->
+  <div class="card">
+    <div class="card-title mb-4">Monthly Breakdown</div>
+    <div class="card-subtitle mb-16">Click any expense row to see its 12-month trend</div>
+    <div class="table-wrap" id="table-wrap"></div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let summaryData = {}, selectedExp = null, trendChart = null;
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// Populate year picker
+const curY = new Date().getFullYear();
+const ySel = document.getElementById('year-picker');
+for(let y = curY; y >= curY - 4; y--){
+  const o = document.createElement('option');
+  o.value = y; o.textContent = y;
+  ySel.appendChild(o);
+}
+
+async function loadData(){
+  const year = +ySel.value;
+  // Fetch all 12 months for this year
+  const allRows = [];
+  for(let m = 1; m <= 12; m++){
+    const data = await FF.get(`/api/transactions?year=${year}&month=${m}`);
+    data.filter(r=>r.type==='expense').forEach(r=>{
+      const desc = r.description.replace(/^\[[^\]]+\]\s*/,'');
+      allRows.push({month:m, desc, amount:r.amount||0});
+    });
+  }
+
+  // Build summary: {desc: {1:amt, 2:amt, ...}}
+  summaryData = {};
+  allRows.forEach(r=>{
+    if(!summaryData[r.desc]) summaryData[r.desc] = {};
+    summaryData[r.desc][r.month] = (summaryData[r.desc][r.month]||0) + r.amount;
+  });
+
+  buildKPIs(year);
+  buildTable(year);
+  if(selectedExp) showTrend(selectedExp);
+}
+
+function buildKPIs(year){
+  const kpiRow = document.getElementById('kpi-row');
+  const totals = Array.from({length:12},(_,i)=>{
+    return Object.values(summaryData).reduce((s,v)=>s+(v[i+1]||0),0);
+  });
+  const maxMonth = totals.indexOf(Math.max(...totals.filter(v=>v>0)));
+  const minMonth = totals.indexOf(Math.min(...totals.filter(v=>v>0)));
+  const avg = totals.filter(v=>v>0).reduce((s,v)=>s+v,0) / (totals.filter(v=>v>0).length||1);
+  const total = totals.reduce((s,v)=>s+v,0);
+  kpiRow.innerHTML = `
+    <div class="kpi-card"><div class="kpi-label">Total ${year}</div><div class="kpi-value" style="font-size:20px">${FF.ils(total)}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Monthly Average</div><div class="kpi-value" style="font-size:20px">${FF.ils(avg)}</div></div>
+    <div class="kpi-card green"><div class="kpi-label">Lowest Month</div><div class="kpi-value green" style="font-size:20px">${FF.ils(totals[minMonth])}</div><div class="kpi-sub">${MONTHS[minMonth]}</div></div>
+    <div class="kpi-card red"><div class="kpi-label">Highest Month</div><div class="kpi-value red" style="font-size:20px">${FF.ils(totals[maxMonth])}</div><div class="kpi-sub">${MONTHS[maxMonth]}</div></div>`;
+}
+
+function buildTable(year){
+  const wrap = document.getElementById('table-wrap');
+  const expenses = Object.keys(summaryData).sort();
+  if(!expenses.length){
+    wrap.innerHTML='<div class="empty-state"><p>No expense data for this year yet.</p></div>';
+    return;
+  }
+
+  // Monthly totals row
+  const monthTotals = Array.from({length:12},(_,i)=>
+    expenses.reduce((s,e)=>s+(summaryData[e][i+1]||0),0)
+  );
+
+  let html = '<table style="width:100%;min-width:900px"><thead><tr>';
+  html += '<th style="text-align:left;position:sticky;left:0;background:var(--bg2);z-index:2;min-width:180px">Expense</th>';
+  MONTHS.forEach(m => html += `<th style="text-align:right;min-width:80px">${m}</th>`);
+  html += '<th style="text-align:right;min-width:90px">Total</th></tr></thead><tbody>';
+
+  expenses.forEach(exp=>{
+    const months = summaryData[exp];
+    const total = Object.values(months).reduce((s,v)=>s+v,0);
+    if(total === 0) return; // hide zero rows
+    const isSelected = selectedExp === exp;
+    html += `<tr onclick="showTrend('${exp.replace(/'/g,"\\'")}') " style="cursor:pointer;${isSelected?'background:var(--accent-dim);':''}" class="exp-row">`;
+    html += `<td style="position:sticky;left:0;background:${isSelected?'var(--accent-dim)':'var(--surface)'};z-index:1;font-size:13px;direction:rtl;text-align:right;padding:10px 14px">${exp}</td>`;
+    for(let m=1;m<=12;m++){
+      const v = months[m]||0;
+      const max = Math.max(...Object.values(months));
+      const intensity = max>0 ? v/max : 0;
+      const bg = intensity>0 ? `rgba(224,92,106,${intensity*0.4})` : 'transparent';
+      html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;background:${bg}">${v>0?FF.ils(v):'—'}</td>`;
+    }
+    html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:500;color:var(--red)">${FF.ils(total)}</td>`;
+    html += '</tr>';
+  });
+
+  // Totals row
+  html += '<tr style="border-top:2px solid var(--border2)">';
+  html += '<td style="position:sticky;left:0;background:var(--bg3);z-index:1;font-size:12px;font-weight:500;color:var(--text2);padding:10px 14px">Total</td>';
+  monthTotals.forEach(v=>{
+    html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:500;color:var(--text)">${v>0?FF.ils(v):'—'}</td>`;
+  });
+  html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:600;color:var(--accent)">${FF.ils(monthTotals.reduce((s,v)=>s+v,0))}</td>`;
+  html += '</tr></tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function showTrend(exp){
+  selectedExp = exp;
+  const months = summaryData[exp] || {};
+  const data = Array.from({length:12},(_,i)=>months[i+1]||0);
+  document.getElementById('chart-card').style.display = 'block';
+  document.getElementById('chart-title').textContent = exp;
+  const ctx = document.getElementById('trend-canvas').getContext('2d');
+  if(trendChart) trendChart.destroy();
+  trendChart = new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels: MONTHS,
+      datasets:[{
+        label: exp,
+        data,
+        backgroundColor: data.map(v=>v>0?'rgba(224,92,106,0.7)':'rgba(224,92,106,0.1)'),
+        borderRadius: 4
+      }]
+    },
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(1)+'k'}}}}
+  });
+  buildTable(+ySel.value); // re-render to highlight selected row
+  document.getElementById('chart-card').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function clearSelection(){
+  selectedExp = null;
+  document.getElementById('chart-card').style.display = 'none';
+  if(trendChart){trendChart.destroy();trendChart=null;}
+  buildTable(+ySel.value);
+}
+
+document.getElementById('load-btn').addEventListener('click', loadData);
+loadData();
+</script>
+{% endblock %}

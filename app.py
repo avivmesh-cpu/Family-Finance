@@ -172,6 +172,10 @@ def mortgage(): return render_template('mortgage.html')
 @auth_required
 def stocks(): return render_template('stocks.html')
 
+@app.route('/expense-tracker')
+@auth_required
+def expense_tracker(): return render_template('expense_tracker.html')
+
 @app.route('/daughter-savings')
 @auth_required
 def daughter_savings(): return render_template('daughter_savings.html')
