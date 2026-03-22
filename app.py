@@ -36,6 +36,7 @@ if DATABASE_URL:
 
     def q(conn, sql, params=()):
         """Run SELECT, return list of dicts."""
+        sql = sql.replace('?', '%s')
         cur = conn.cursor()
         cur.execute(sql, params if params else None)
         cols = [d[0] for d in cur.description] if cur.description else []
@@ -45,6 +46,7 @@ if DATABASE_URL:
 
     def run(conn, sql, params=()):
         """Run INSERT/UPDATE/DELETE."""
+        sql = sql.replace('?', '%s')
         cur = conn.cursor()
         cur.execute(sql, params if params else None)
         cur.close()
@@ -61,6 +63,7 @@ if DATABASE_URL:
         except: pass
 
     def run_ddl(conn, sql):
+        sql = sql.replace('?', '%s')
         cur = conn.cursor()
         cur.execute(sql)
         cur.close()
