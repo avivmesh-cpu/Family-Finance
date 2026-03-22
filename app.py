@@ -340,6 +340,9 @@ def add_stock():
 
 def _yahoo(sym):
     """Fetch current price for a symbol from Yahoo Finance."""
+    sym = sym.strip().upper()
+    if not sym:
+        raise Exception('Empty symbol')
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*',
@@ -347,19 +350,24 @@ def _yahoo(sym):
         'Origin': 'https://finance.yahoo.com',
         'Referer': 'https://finance.yahoo.com/quote/' + sym,
     }
+    last_err = None
     for host in ['query1', 'query2']:
         try:
             url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d'
             resp = req_lib.get(url, timeout=10, headers=headers)
-            rd = resp.json()['chart']['result'][0]
+            data = resp.json()
+            rd = data['chart']['result'][0]
             closes = [c for c in rd['indicators']['quote'][0].get('close', []) if c is not None]
-            if closes: return closes[-1]
+            if closes:
+                return float(closes[-1])
             meta = rd['meta']
             price = meta.get('regularMarketPrice') or meta.get('chartPreviousClose') or meta.get('previousClose')
-            if price: return price
-        except Exception:
+            if price:
+                return float(price)
+        except Exception as e:
+            last_err = e
             continue
-    raise Exception(f'No price found for {sym}')
+    raise Exception(f'No price for {sym}: {last_err}')
 
 # MUST be before /api/stocks/<int:sid> routes
 @app.route('/api/stocks/prices', methods=['GET'])
@@ -380,12 +388,16 @@ def stock_prices_list():
 def stock_prices_alt():
     conn = get_db(); rows = q(conn, 'SELECT DISTINCT symbol FROM stock_holding'); close_db(conn)
     prices = {}
+    errors = {}
     for r in rows:
-        sym = r['symbol']
+        sym = (r['symbol'] or '').strip().upper()
         if not sym: continue
-        try: prices[sym] = _yahoo(sym)
-        except Exception as e: prices[sym] = None
-    return jsonify(prices)
+        try:
+            prices[sym] = _yahoo(sym)
+        except Exception as e:
+            prices[sym] = None
+            errors[sym] = str(e)
+    return jsonify({'prices': prices, 'errors': errors})
 
 @app.route('/api/stock-price/<path:symbol>', methods=['GET'])
 @auth_required
