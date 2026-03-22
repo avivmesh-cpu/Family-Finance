@@ -333,22 +333,35 @@ def _yahoo(sym):
             continue
     raise Exception(f'No price found for {sym}')
 
-# IMPORTANT: /api/stocks/prices MUST be defined BEFORE /api/stocks/<int:sid>
+# MUST be before /api/stocks/<int:sid> routes
 @app.route('/api/stocks/prices', methods=['GET'])
 @auth_required
-def get_stock_prices():
+def stock_prices_list():
     conn = get_db(); rows = q(conn, 'SELECT DISTINCT symbol FROM stock_holding'); close_db(conn)
     prices = {}
     for r in rows:
         sym = r['symbol']
         if not sym: continue
         try: prices[sym] = _yahoo(sym)
-        except: prices[sym] = None
+        except Exception as e: prices[sym] = None
     return jsonify(prices)
 
-@app.route('/api/stock-price/<symbol>', methods=['GET'])
+# Alternative URL with no routing conflict
+@app.route('/api/stock-prices', methods=['GET'])
 @auth_required
-def get_single_price(symbol):
+def stock_prices_alt():
+    conn = get_db(); rows = q(conn, 'SELECT DISTINCT symbol FROM stock_holding'); close_db(conn)
+    prices = {}
+    for r in rows:
+        sym = r['symbol']
+        if not sym: continue
+        try: prices[sym] = _yahoo(sym)
+        except Exception as e: prices[sym] = None
+    return jsonify(prices)
+
+@app.route('/api/stock-price/<path:symbol>', methods=['GET'])
+@auth_required
+def stock_price_single(symbol):
     try: return jsonify({'symbol':symbol.upper(),'price':_yahoo(symbol.upper())})
     except Exception as e: return jsonify({'symbol':symbol.upper(),'price':None,'error':str(e)})
 
