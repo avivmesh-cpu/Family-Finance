@@ -35,16 +35,23 @@ if DATABASE_URL:
     import re as _re
 
     def _pg(sql, params):
-        """Convert ? placeholders to $1,$2,... for pg8000."""
+        """Convert ? placeholders to $1,$2,... and return numbered params dict."""
         count = [0]
         def rep(m): count[0] += 1; return f'${count[0]}'
-        return _re.sub(r'\?', rep, sql), list(params)
+        sql = _re.sub(r'\?', rep, sql)
+        # pg8000 native expects params as keyword args named by position
+        # e.g. conn.run("SELECT $1", **{"1": val})  -- but this varies by version
+        # Safest: pass as a tuple to 'parameters' positional arg (3rd arg after stream)
+        return sql, list(params)
 
     def q(conn, sql, params=()):
         """Run SELECT, return list of dicts."""
         if params:
             sql, p = _pg(sql, params)
-            rows = conn.run(sql, parameters=p)
+            # pg8000 native: run(operation, stream=None, types=None, **kwargs)
+            # kwargs are the parameter values named as their position number
+            kwargs = {str(i+1): v for i, v in enumerate(p)}
+            rows = conn.run(sql, **kwargs)
         else:
             rows = conn.run(sql)
         cols = [c['name'] for c in (conn.columns or [])]
@@ -54,7 +61,8 @@ if DATABASE_URL:
         """Run INSERT/UPDATE/DELETE."""
         if params:
             sql, p = _pg(sql, params)
-            conn.run(sql, parameters=p)
+            kwargs = {str(i+1): v for i, v in enumerate(p)}
+            conn.run(sql, **kwargs)
         else:
             conn.run(sql)
 
