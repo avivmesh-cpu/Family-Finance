@@ -310,21 +310,6 @@ def add_stock():
          d.get('purchase_date',''), d.get('notes','')))
     close_db(conn); return jsonify({'status':'ok'})
 
-@app.route('/api/stocks/<int:sid>', methods=['PUT'])
-@auth_required
-def update_stock(sid):
-    d = request.json; conn = get_db()
-    run(conn, 'UPDATE stock_holding SET symbol=?,purchase_price=?,quantity=?,notes=? WHERE id=?',
-        (d.get('symbol','').upper(), float(d.get('purchase_price',0)),
-         float(d.get('quantity',0)), d.get('notes',''), sid))
-    close_db(conn); return jsonify({'status':'ok'})
-
-@app.route('/api/stocks/<int:sid>', methods=['DELETE'])
-@auth_required
-def delete_stock(sid):
-    conn = get_db(); run(conn, 'DELETE FROM stock_holding WHERE id=?', (sid,)); close_db(conn)
-    return jsonify({'status':'ok'})
-
 def _yahoo(sym):
     """Fetch current price for a symbol from Yahoo Finance."""
     headers = {
@@ -334,7 +319,6 @@ def _yahoo(sym):
         'Origin': 'https://finance.yahoo.com',
         'Referer': 'https://finance.yahoo.com/quote/' + sym,
     }
-    # Try query1 then query2
     for host in ['query1', 'query2']:
         try:
             url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d'
@@ -349,6 +333,7 @@ def _yahoo(sym):
             continue
     raise Exception(f'No price found for {sym}')
 
+# IMPORTANT: /api/stocks/prices MUST be defined BEFORE /api/stocks/<int:sid>
 @app.route('/api/stocks/prices', methods=['GET'])
 @auth_required
 def get_stock_prices():
@@ -366,6 +351,21 @@ def get_stock_prices():
 def get_single_price(symbol):
     try: return jsonify({'symbol':symbol.upper(),'price':_yahoo(symbol.upper())})
     except Exception as e: return jsonify({'symbol':symbol.upper(),'price':None,'error':str(e)})
+
+@app.route('/api/stocks/<int:sid>', methods=['PUT'])
+@auth_required
+def update_stock(sid):
+    d = request.json; conn = get_db()
+    run(conn, 'UPDATE stock_holding SET symbol=?,purchase_price=?,quantity=?,notes=? WHERE id=?',
+        (d.get('symbol','').upper(), float(d.get('purchase_price',0)),
+         float(d.get('quantity',0)), d.get('notes',''), sid))
+    close_db(conn); return jsonify({'status':'ok'})
+
+@app.route('/api/stocks/<int:sid>', methods=['DELETE'])
+@auth_required
+def delete_stock(sid):
+    conn = get_db(); run(conn, 'DELETE FROM stock_holding WHERE id=?', (sid,)); close_db(conn)
+    return jsonify({'status':'ok'})
 
 # ── Daughter/Romi ─────────────────────────────────────────────────
 @app.route('/api/daughter', methods=['GET'])
