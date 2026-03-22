@@ -149,7 +149,10 @@ def login():
 def logout(): session.clear(); return redirect(url_for('login'))
 
 @app.route('/health')
-def health(): return jsonify({'status':'ok','db':'pg' if PG else 'sqlite'})
+def health(): return jsonify({'status':'ok','db':'pg' if PG else 'sqlite','version':'v3','routes_count': len(list(app.url_map.iter_rules()))})
+
+@app.route('/api/ping')
+def ping(): return jsonify({'pong': True, 'stock_routes': [str(r) for r in app.url_map.iter_rules() if 'stock' in str(r)]})
 
 # ── Pages ─────────────────────────────────────────────────────────
 @app.route('/')
