@@ -70,7 +70,7 @@ async function doRefreshPrices() {
   status.textContent = 'Fetching prices...';
   status.style.color = 'var(--text3)';
   try {
-    const resp = await fetch('/api/stocks/prices');
+    const resp = await fetch('/api/stock-prices');
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
     prices = data;
