@@ -174,14 +174,48 @@ async function doSave() {
   const btn = document.getElementById('save-btn');
   btn.textContent = 'Saving...'; btn.disabled = true;
   try {
+    // Delete marked rows
     for (const h of holdings.filter(x => x._del && !x._new))
       await FF.del('/api/stocks/' + h.id);
-    for (const h of holdings.filter(x => !x._del && x._new && x.symbol))
-      await FF.post('/api/stocks', { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
-    for (const h of holdings.filter(x => !x._del && !x._new))
-      await FF.put('/api/stocks/' + h.id, { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
+
+    // Merge duplicates: group new+existing by symbol, weighted avg
+    const toSave = holdings.filter(x => !x._del && x.symbol);
+    const merged = {};
+    for (const h of toSave) {
+      const sym = h.symbol.toUpperCase();
+      if (!merged[sym]) {
+        merged[sym] = { ...h, symbol: sym, _ids: h._new ? [] : [h.id] };
+      } else {
+        // Weighted average
+        const totalQty = merged[sym].quantity + h.quantity;
+        merged[sym].purchase_price = totalQty > 0
+          ? (merged[sym].purchase_price * merged[sym].quantity + h.purchase_price * h.quantity) / totalQty
+          : merged[sym].purchase_price;
+        merged[sym].quantity = totalQty;
+        if (!h._new) merged[sym]._ids.push(h.id);
+      }
+    }
+
+    // Delete extra rows for same symbol (keep only first id per symbol)
+    for (const sym of Object.keys(merged)) {
+      const ids = merged[sym]._ids;
+      for (let i = 1; i < ids.length; i++) await FF.del('/api/stocks/' + ids[i]);
+    }
+
+    // Save each merged symbol
+    for (const sym of Object.keys(merged)) {
+      const h = merged[sym];
+      if (h._ids.length === 0) {
+        // New row
+        await FF.post('/api/stocks', { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
+      } else {
+        // Update existing
+        await FF.put('/api/stocks/' + h._ids[0], { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
+      }
+    }
+
     FF.toast('Saved!');
-    await init(); // Reload everything including prices
+    await init();
   } catch(e) { FF.toast('Error: ' + e.message, 'error'); }
   btn.textContent = '✓ Save All'; btn.disabled = false;
 }

@@ -285,6 +285,8 @@ async function doAddAccount() {
     await loadData();
   } catch(e) { FF.toast('Error: ' + e.message, 'error'); }
 }
+
+const { year, month } = FF.currentYM();
 document.getElementById('month-picker').value = year + '-' + String(month).padStart(2, '0');
 document.getElementById('load-btn').addEventListener('click', loadData);
 loadData();
