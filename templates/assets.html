@@ -10,7 +10,7 @@
     <input type="month" id="month-picker" class="month-input" />
     <button class="btn btn-primary btn-sm" id="load-btn">Load</button>
     <div class="spacer"></div>
-    <button id="save-btn" class="btn btn-sm" onclick="saveAll()" style="background:var(--green);color:#000;font-weight:600">&#10003; Save All</button>
+    <button id="save-btn" class="btn btn-sm" onclick="saveAll()" style="background:var(--green);color:#000;font-weight:600">✓ Save All</button>
   </div>
 
   <div class="kpi-grid">
@@ -185,7 +185,7 @@ async function saveAll() {
   } catch(e) {
     FF.toast('Error: ' + e.message, 'error');
   }
-  btn.textContent = '&#10003; Save All'; btn.disabled = false;
+  btn.textContent = '✓ Save All'; btn.disabled = false;
 }
 
 function updateKPIs(accountRows) {

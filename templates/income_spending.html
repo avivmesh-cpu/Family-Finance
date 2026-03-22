@@ -10,7 +10,7 @@
     <input type="month" id="month-picker" class="month-input" />
     <button class="btn btn-primary btn-sm" id="load-btn">Load</button>
     <div class="spacer"></div>
-    <button id="save-btn" class="btn btn-sm" onclick="saveAll()" style="background:var(--green);color:#000;font-weight:600">&#10003; Save All</button>
+    <button id="save-btn" class="btn btn-sm" onclick="saveAll()" style="background:var(--green);color:#000;font-weight:600">✓ Save All</button>
   </div>
 
   <div class="kpi-grid">
@@ -93,14 +93,76 @@ function syncDOM(){
   });
 }
 
+// Fixed monthly expenses — seeded automatically for every new month
+const FIXED_EXPENSES = [
+  // Housing
+  {cat:'Housing', desc:'משכנתא'},
+  {cat:'Housing', desc:'ארנונה'},
+  {cat:'Housing', desc:'ועד בית'},
+  {cat:'Housing', desc:'ביטוח מבנה דירה'},
+  {cat:'Housing', desc:'ביטוח חיים לדירה'},
+  // Utilities
+  {cat:'Utilities', desc:'חשבון חשמל'},
+  {cat:'Utilities', desc:'חשבון גז'},
+  {cat:'Utilities', desc:'חשבון מים'},
+  {cat:'Utilities', desc:'ספק אינטרנט'},
+  {cat:'Utilities', desc:'סלולארי (אביב)'},
+  {cat:'Utilities', desc:'סלולארי (ענבל)'},
+  {cat:'Utilities', desc:'SPOTIFY'},
+  {cat:'Utilities', desc:'GOOGLE ONE'},
+  {cat:'Utilities', desc:'NETFLIX'},
+  {cat:'Utilities', desc:'סלקום TV'},
+  // Bank
+  {cat:'Other', desc:'עמלות בנק מזרחי'},
+  {cat:'Other', desc:'עמלות בנק הפועלים'},
+  // Food
+  {cat:'Food', desc:'מצרכי מזון'},
+  {cat:'Food', desc:'אוכל בחוץ (מסעדות, בתי קפה, משלוחים)'},
+  // Health
+  {cat:'Health', desc:'תרופות בדיקות וטיפולים רפואיים'},
+  // Children
+  {cat:'Children', desc:'גנים צהרונים ובייביסיטרים'},
+  {cat:'Children', desc:'חוגים'},
+  {cat:'Children', desc:'צעצועים לילדים'},
+  // Transport
+  {cat:'Transport', desc:'דלק לרכב'},
+  {cat:'Transport', desc:'טיפולים לרכב'},
+  {cat:'Transport', desc:'חניה'},
+  // Entertainment
+  {cat:'Entertainment', desc:'תרבות וספורט'},
+  {cat:'Entertainment', desc:'חופשות בארץ'},
+  {cat:'Entertainment', desc:'חופשות בחול'},
+  // Clothing
+  {cat:'Clothing', desc:'ביגוד תכשיטים קוסמטיקה'},
+  // Housing improvements
+  {cat:'Housing', desc:'ריהוט וכלי בית'},
+  {cat:'Housing', desc:'שיפוץ ועיצוב הבית'},
+  // Other
+  {cat:'Other', desc:'גאדגטים ואלקטרוניקה'},
+  {cat:'Other', desc:'מתנות'},
+  {cat:'Other', desc:'ספרים'},
+  {cat:'Other', desc:'שונות'},
+];
+
 async function loadData(){
   const{year,month}=getYM();CY=year;CM=month;
   let data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
+
+  // Seed income rows if none exist
   if(!data.some(r=>r.type.startsWith('income'))){
     await FF.post('/api/transactions',{year,month,type:'income_salary',description:'Inbal Salary',amount:0});
     await FF.post('/api/transactions',{year,month,type:'income_salary',description:'Aviv Salary',amount:0});
     data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
   }
+
+  // Seed fixed expenses if no expenses exist yet for this month
+  if(!data.some(r=>r.type==='expense')){
+    for(const e of FIXED_EXPENSES){
+      await FF.post('/api/transactions',{year,month,type:'expense',description:'['+e.cat+'] '+e.desc,amount:0});
+    }
+    data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
+  }
+
   rows=data.map(r=>({...r,_del:false,_new:false}));
   buildTables();updateKPIs();buildCatChart();
   await buildTrendChart();
@@ -207,7 +269,7 @@ async function saveAll(){
     FF.toast('Saved!');
     await loadData();
   }catch(e){FF.toast('Error: '+e.message,'error');}
-  btn.textContent='&#10003; Save All';btn.disabled=false;
+  btn.textContent='✓ Save All';btn.disabled=false;
 }
 
 function buildCatChart(){
