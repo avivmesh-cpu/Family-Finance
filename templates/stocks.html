@@ -176,7 +176,7 @@ async function doSave() {
   try {
     for (const h of holdings.filter(x => x._del && !x._new))
       await FF.del('/api/stocks/' + h.id);
-    for (const h of holdings.filter(x => !x._del && x._new && h.symbol))
+    for (const h of holdings.filter(x => !x._del && x._new && x.symbol))
       await FF.post('/api/stocks', { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
     for (const h of holdings.filter(x => !x._del && !x._new))
       await FF.put('/api/stocks/' + h.id, { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
