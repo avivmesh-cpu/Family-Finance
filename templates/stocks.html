@@ -73,11 +73,19 @@ async function doRefreshPrices() {
     const resp = await fetch('/api/stock-prices');
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
-    prices = data;
+    // Handle both {prices:{}, errors:{}} and flat {SYM: price} formats
+    prices = data.prices !== undefined ? data.prices : data;
+    const errs = data.errors || {};
     buildTable(); updateKPIs(); buildCharts();
     const found = Object.entries(prices).filter(([k,v]) => v).map(([k,v]) => k + ' $' + Number(v).toFixed(2)).join('  |  ');
-    status.textContent = found || 'No prices found — check your symbols';
-    status.style.color = found ? 'var(--green)' : 'var(--red)';
+    const errMsg = Object.entries(errs).map(([k,v]) => k + ': ' + v).join(', ');
+    if (found) {
+      status.textContent = found;
+      status.style.color = 'var(--green)';
+    } else {
+      status.textContent = 'No prices found.' + (errMsg ? ' Errors: ' + errMsg : '');
+      status.style.color = 'var(--red)';
+    }
   } catch(e) {
     status.textContent = 'Error: ' + e.message;
     status.style.color = 'var(--red)';
