@@ -188,7 +188,7 @@ function buildExpenses(){
         style="width:100%" onkeydown="if(event.key==='Enter'){event.preventDefault();saveAll();}" /></td>
       <td><input class="editable-cell mono" data-f="amt" type="number"
         value="${r.amount||''}" placeholder="0" style="text-align:right;width:160px" oninput="liveUpdate()"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();saveAll();}" /></td>
+        onkeydown="if(event.key==='Enter'){event.preventDefault();liveUpdate();saveAll();}" /></td>
       <td><button class="btn btn-danger btn-icon" onclick="delRow(${r.id})">&#x2715;</button></td>`;
     tbody.appendChild(tr);
   });
@@ -214,7 +214,7 @@ function syncDOM(){
   });
 }
 
-function liveUpdate(){syncDOM();updateKPIs();calcTotals();}
+function liveUpdate(){syncDOM();updateKPIs();calcTotals();buildCatChart();}
 
 function calcTotals(){
   document.getElementById('income-total').textContent=FF.ils(rows.filter(r=>!r._del&&r.type.startsWith('income')).reduce((s,r)=>s+(+r.amount||0),0));
@@ -269,14 +269,20 @@ async function saveAll(){
 }
 
 function buildCatChart(){
-  const groups={};
-  rows.filter(r=>!r._del&&r.type==='expense').forEach(r=>{const c=getCat(r.description);groups[c]=(groups[c]||0)+(+r.amount||0);});
-  const cats=Object.keys(groups);
+  // Only show expenses with amount > 0, labeled by description
+  const expRows = rows.filter(r=>!r._del&&r.type==='expense'&&(+r.amount||0)>0);
+  const labels = expRows.map(r=>getDesc(r.description));
+  const data   = expRows.map(r=>+r.amount||0);
+  // Generate distinct colors cycling through palette
+  const palette=['#5b8df6','#4caf88','#c9a84c','#e05c6a','#9b7cf8','#4cc9c9','#f08c4b','#e87dbd','#7dc8e8','#a8d86e','#9aa0bb','#e8c96a','#5dcaa5','#d85a30','#185fa5'];
+  const colors = labels.map((_,i)=>palette[i%palette.length]);
   const ctx=document.getElementById('cat-chart').getContext('2d');
   if(cChart)cChart.destroy();
-  if(!cats.length){cChart=null;return;}
-  cChart=new Chart(ctx,{type:'doughnut',data:{labels:cats,datasets:[{data:cats.map(c=>groups[c]),backgroundColor:cats.map(c=>CATS[c]||'#9aa0bb'),borderWidth:2,borderColor:'#1f2434'}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:11},boxWidth:12}}}}});
+  if(!labels.length){cChart=null;return;}
+  cChart=new Chart(ctx,{type:'doughnut',
+    data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'#1f2434'}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:10,padding:6}}}}});
 }
 
 async function buildTrendChart(){
