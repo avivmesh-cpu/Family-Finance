@@ -154,8 +154,14 @@ def health(): return jsonify({'status':'ok','db':'pg' if PG else 'sqlite','versi
 @app.route('/api/ping')
 def ping(): return jsonify({'pong': True, 'stock_routes': [str(r) for r in app.url_map.iter_rules() if 'stock' in str(r)]})
 
-@app.route('/api/debug-yahoo/<path:symbol>')
+@app.route('/api/debug-stocks')
 @auth_required
+def debug_stocks():
+    conn = get_db()
+    all_rows = q(conn, 'SELECT * FROM stock_holding')
+    distinct = q(conn, 'SELECT DISTINCT symbol FROM stock_holding')
+    close_db(conn)
+    return jsonify({'all': all_rows, 'distinct_symbols': distinct, 'count': len(all_rows)})
 def debug_yahoo(symbol):
     import traceback
     headers = {
