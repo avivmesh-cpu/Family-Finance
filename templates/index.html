@@ -29,7 +29,7 @@
     <div class="kpi-card purple">
       <div class="kpi-label">Net Worth</div>
       <div class="kpi-value" id="kpi-networth">—</div>
-      <div class="kpi-sub">Total Assets (no mortgage)</div>
+      <div class="kpi-sub">Bank + Stocks</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Romi IVV Savings</div>
@@ -107,7 +107,7 @@
     latestBank = latestMonthAssets.filter(a=>a.account_type==='bank').reduce((s,a)=>s+a.balance,0);
     latestStocks = latestMonthAssets.filter(a=>a.account_type==='stocks').reduce((s,a)=>s+a.balance,0);
   }
-  const networth = latestAssets;
+  const networth = latestBank + latestStocks;
   document.getElementById('kpi-networth').textContent = FF.ils(networth);
 
   if (daughter.length) {
@@ -150,16 +150,14 @@
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}
   });
 
-  // ── Chart 3: Net Worth trend (bank+stocks-mortgage) ──
+  // ── Chart 3: Net Worth trend (bank+stocks only) ──
   const ctx3 = document.getElementById('networth-chart').getContext('2d');
   const nwData = assetKeys.slice(-18).map(k => {
     const [ky,km] = k.split('-');
     const monthAssets = allAssets.filter(a=>a.year===+ky&&a.month===+km);
-    const bankVal = monthAssets.filter(a=>a.account_type==='bank').reduce((s,a)=>s+a.balance,0);
+    const bankVal  = monthAssets.filter(a=>a.account_type==='bank').reduce((s,a)=>s+a.balance,0);
     const stockVal = monthAssets.filter(a=>a.account_type==='stocks').reduce((s,a)=>s+a.balance,0);
-    const mortEntry = mortgageData.find(m=>`${m.year}-${String(m.month).padStart(2,'0')}`===k);
-    const mort = mortEntry ? mortEntry.remaining_balance : latestMortgage;
-    return bankVal + stockVal - mort;
+    return bankVal + stockVal;
   });
   new Chart(ctx3, {
     type: 'line',
