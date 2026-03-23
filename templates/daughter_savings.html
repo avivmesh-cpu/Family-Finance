@@ -9,9 +9,8 @@
   <!-- KPIs -->
   <div class="kpi-grid">
     <div class="kpi-card green"><div class="kpi-label">Virtual Shares Accumulated</div><div class="kpi-value green" id="kpi-shares">—</div></div>
-    <div class="kpi-card blue"><div class="kpi-label">Current Value (ILS)</div><div class="kpi-value blue" id="kpi-value-ils">—</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">Current Value (ILS)</div><div class="kpi-value blue" id="kpi-value-ils">—</div><div class="kpi-sub">Based on actual holdings</div></div>
     <div class="kpi-card"><div class="kpi-label">Total Invested (ILS)</div><div class="kpi-value" id="kpi-invested">—</div></div>
-    <div class="kpi-card"><div class="kpi-label">Portfolio Value (ILS)</div><div class="kpi-value" id="kpi-portfolio-ils">—</div></div>
     <div class="kpi-card"><div class="kpi-label">Gain (ILS)</div><div class="kpi-value" id="kpi-gain">—</div></div>
     <div class="kpi-card"><div class="kpi-label">Months Accumulated</div><div class="kpi-value" id="kpi-months">0</div></div>
   </div>
@@ -19,49 +18,11 @@
   <!-- Charts -->
   <div class="grid-2 mb-24">
     <div class="card"><div class="card-title mb-16">Cumulative Virtual Shares</div><div class="chart-wrap"><canvas id="c1"></canvas></div></div>
-    <div class="card"><div class="card-title mb-16">Portfolio Value (ILS)</div><div class="chart-wrap"><canvas id="c2"></canvas></div></div>
+    <div class="card"><div class="card-title mb-16">Actual Portfolio Value (ILS)</div><div class="chart-wrap"><canvas id="c2"></canvas></div></div>
   </div>
 
-  <!-- Auto-accumulation section -->
+  <!-- Actual Purchases — FIRST -->
   <div class="card mb-24">
-    <div class="flex-between mb-4">
-      <div>
-        <div class="card-title">Virtual Accumulation</div>
-        <div class="card-subtitle">₪300 worth of IVV calculated each month on the 15th. Auto-fills missing months.</div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button onclick="doAutoAccumulate()" id="auto-btn"
-          style="padding:8px 16px;background:var(--blue);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">
-          ↻ Auto-fill Missing Months
-        </button>
-      </div>
-    </div>
-    <div style="display:flex;gap:16px;align-items:center;margin:12px 0;flex-wrap:wrap">
-      <div class="form-group" style="margin:0">
-        <label class="form-label">Starting from</label>
-        <input type="month" id="start-month" class="form-input" style="width:160px" />
-      </div>
-      <div class="form-group" style="margin:0">
-        <label class="form-label">ILS / month</label>
-        <input type="number" id="ils-month" class="form-input" value="300" style="width:100px" />
-      </div>
-    </div>
-    <div id="auto-status" style="font-size:13px;min-height:18px;color:var(--text3)"></div>
-
-    <div class="section-divider mt-16">Monthly Log</div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th>Month</th><th>ILS</th><th>USD/ILS</th><th>IVV Price</th>
-          <th>Virtual Shares</th><th>Cumulative</th><th>Whole # Crossed?</th><th></th>
-        </tr></thead>
-        <tbody id="hist-tbody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Actual Purchases -->
-  <div class="card">
     <div class="flex-between mb-16">
       <div>
         <div class="card-title">Actual Purchases</div>
@@ -100,6 +61,42 @@
     </div>
   </div>
 
+  <!-- Virtual Accumulation — SECOND -->
+  <div class="card">
+    <div class="flex-between mb-4">
+      <div>
+        <div class="card-title">Virtual Accumulation</div>
+        <div class="card-subtitle">₪300 worth of IVV calculated each month on the 15th. Auto-fills missing months.</div>
+      </div>
+      <button onclick="doAutoAccumulate()" id="auto-btn"
+        style="padding:8px 16px;background:var(--blue);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer">
+        ↻ Auto-fill Missing Months
+      </button>
+    </div>
+    <div style="display:flex;gap:16px;align-items:center;margin:12px 0;flex-wrap:wrap">
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Starting from</label>
+        <input type="month" id="start-month" class="form-input" style="width:160px" />
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">ILS / month</label>
+        <input type="number" id="ils-month" class="form-input" value="300" style="width:100px" />
+      </div>
+    </div>
+    <div id="auto-status" style="font-size:13px;min-height:18px;color:var(--text3)"></div>
+
+    <div class="section-divider mt-16">Monthly Log</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Month</th><th>ILS</th><th>USD/ILS</th><th>IVV Price</th>
+          <th>Virtual Shares</th><th>Cumulative</th><th>Whole # Crossed?</th><th></th>
+        </tr></thead>
+        <tbody id="hist-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 {% endblock %}
 
@@ -108,8 +105,6 @@
 let entries = [], purchases = [], chart1 = null, chart2 = null;
 let liveIVV = null, liveILSrate = null;
 
-// Set default start month
-const { year, month } = FF.currentYM();
 document.getElementById('start-month').value = '2024-01';
 
 // ── AUTO-ACCUMULATE ──
@@ -117,7 +112,7 @@ async function doAutoAccumulate() {
   const btn = document.getElementById('auto-btn');
   const status = document.getElementById('auto-status');
   btn.disabled = true; btn.textContent = 'Fetching prices…';
-  status.textContent = 'Checking missing months…';
+  status.textContent = 'Checking missing months…'; status.style.color = 'var(--text3)';
   const startVal = document.getElementById('start-month').value;
   const [sy, sm] = startVal ? startVal.split('-') : ['2024', '1'];
   const ilsPerMonth = parseFloat(document.getElementById('ils-month').value) || 300;
@@ -130,15 +125,12 @@ async function doAutoAccumulate() {
       status.style.color = 'var(--green)';
     } else {
       status.textContent = 'All months already up to date.';
-      status.style.color = 'var(--text3)';
     }
-    if (result.errors && result.errors.length) {
+    if (result.errors && result.errors.length)
       status.textContent += ' | Errors: ' + result.errors.join(', ');
-    }
     await loadAll();
   } catch(e) {
-    status.textContent = 'Error: ' + e.message;
-    status.style.color = 'var(--red)';
+    status.textContent = 'Error: ' + e.message; status.style.color = 'var(--red)';
   }
   btn.disabled = false; btn.textContent = '↻ Auto-fill Missing Months';
 }
@@ -155,23 +147,28 @@ async function loadAll() {
   updateKPIs(); renderHistTable(); renderPurchaseTable(); renderCharts();
 }
 
-// ── KPIs ──
+// ── KPIs — Current Value based on ACTUAL purchases ──
 function updateKPIs() {
   if (!entries.length) return;
   const sorted = [...entries].sort((a,b) => a.year-b.year || a.month-b.month);
   const last = sorted[sorted.length-1];
   const totalILS  = sorted.reduce((s,r) => s + r.ils_invested, 0);
   const rate      = liveILSrate || last.usd_ils_rate;
-  const curValUSD = liveIVV ? last.cumulative_shares * liveIVV : null;
-  const curValILS = curValUSD ? curValUSD * rate : null;
-  const totalUSD  = sorted.reduce((s,r) => s + r.ils_invested / r.usd_ils_rate, 0);
-  const gainILS   = curValILS ? (curValUSD - totalUSD) * rate : null;
 
-  document.getElementById('kpi-shares').textContent       = last.cumulative_shares.toFixed(6);
-  document.getElementById('kpi-value-ils').textContent    = curValILS ? FF.ils(curValILS) : '—';
-  document.getElementById('kpi-portfolio-ils').textContent = curValILS ? FF.ils(curValILS) : '—';
-  document.getElementById('kpi-invested').textContent     = FF.ils(totalILS);
-  document.getElementById('kpi-months').textContent       = sorted.length;
+  // Current value = actual shares held × live IVV price
+  const actualShares = purchases.reduce((s,p) => s + p.shares, 0);
+  const curValUSD = liveIVV && actualShares ? actualShares * liveIVV : null;
+  const curValILS = curValUSD ? curValUSD * rate : null;
+
+  // Gain = current value - cost of actual purchases
+  const actualCostUSD = purchases.reduce((s,p) => s + p.shares * p.price_usd, 0);
+  const gainILS = curValILS ? (curValUSD - actualCostUSD) * rate : null;
+
+  document.getElementById('kpi-shares').textContent    = last.cumulative_shares.toFixed(6);
+  document.getElementById('kpi-value-ils').textContent = curValILS ? FF.ils(curValILS) : '—';
+  document.getElementById('kpi-invested').textContent  = FF.ils(totalILS);
+  document.getElementById('kpi-months').textContent    = sorted.length;
+
   if (gainILS !== null) {
     const el = document.getElementById('kpi-gain');
     el.textContent = (gainILS >= 0 ? '+' : '') + FF.ils(gainILS);
@@ -200,7 +197,9 @@ function renderHistTable() {
       '<td class="td-mono">$' + FF.dec(r.ivv_price_usd) + '</td>' +
       '<td class="td-mono td-positive">+' + r.shares_purchased.toFixed(6) + '</td>' +
       '<td class="td-mono">' + r.cumulative_shares.toFixed(6) + '</td>' +
-      '<td style="text-align:center">' + (crossed ? '<span style="color:var(--green);font-weight:600">✓ ' + Math.floor(r.cumulative_shares) + ' share' + (Math.floor(r.cumulative_shares)>1?'s':'') + '</span>' : '—') + '</td>' +
+      '<td style="text-align:center">' + (crossed
+        ? '<span style="color:var(--green);font-weight:600">✓ ' + Math.floor(r.cumulative_shares) + ' share' + (Math.floor(r.cumulative_shares)>1?'s':'') + '</span>'
+        : '—') + '</td>' +
       '<td><button class="btn btn-danger btn-icon" onclick="doDelete(' + r.id + ')">✕</button></td>';
     tb.appendChild(tr);
   });
@@ -211,20 +210,18 @@ function renderPurchaseTable() {
   const tb = document.getElementById('purchase-tbody');
   tb.innerHTML = '';
   if (!purchases.length) {
-    tb.innerHTML = '<tr><td colspan="6"><div class="empty-state"><p>No actual purchases yet.</p></div></td></tr>';
+    tb.innerHTML = '<tr><td colspan="6"><div class="empty-state"><p>No actual purchases yet. Click + Add Purchase.</p></div></td></tr>';
     return;
   }
   let cumShares = 0;
-  const sorted = [...purchases].sort((a,b) => a.purchase_date.localeCompare(b.purchase_date));
-  sorted.forEach(p => {
+  [...purchases].sort((a,b) => a.purchase_date.localeCompare(b.purchase_date)).forEach(p => {
     cumShares += p.shares;
-    const cost = p.shares * p.price_usd;
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td>' + p.purchase_date + '</td>' +
       '<td class="td-mono td-positive">+' + p.shares.toFixed(6) + '</td>' +
       '<td class="td-mono">$' + FF.dec(p.price_usd) + '</td>' +
-      '<td class="td-mono">$' + FF.dec(cost) + '</td>' +
+      '<td class="td-mono">$' + FF.dec(p.shares * p.price_usd) + '</td>' +
       '<td class="td-mono">' + cumShares.toFixed(6) + '</td>' +
       '<td><button class="btn btn-danger btn-icon" onclick="doDeletePurchase(' + p.id + ')">✕</button></td>';
     tb.appendChild(tr);
@@ -237,7 +234,7 @@ function showAddPurchase() {
 }
 
 async function doAddPurchase() {
-  const date   = document.getElementById('p-date').value;
+  const date  = document.getElementById('p-date').value;
   const shares = parseFloat(document.getElementById('p-shares').value);
   const price  = parseFloat(document.getElementById('p-price').value);
   if (!date || !shares || !price) { FF.toast('Fill in all fields', 'error'); return; }
@@ -263,8 +260,8 @@ async function doDeletePurchase(id) {
 function renderCharts() {
   const sorted = [...entries].sort((a,b) => a.year-b.year || a.month-b.month);
   const labels = sorted.map(r => FF.monthLabel(r.year, r.month));
-  const rate   = liveILSrate || (sorted.length ? sorted[sorted.length-1].usd_ils_rate : 3.7);
 
+  // Chart 1: Virtual cumulative shares
   const ctx1 = document.getElementById('c1').getContext('2d');
   if (chart1) chart1.destroy();
   chart1 = new Chart(ctx1, {
@@ -276,11 +273,30 @@ function renderCharts() {
       scales: { y: { ticks: { callback: v => v.toFixed(3) + ' sh' } } } }
   });
 
+  // Chart 2: Actual portfolio value in ILS over time
+  // For each month, calculate actual shares held × IVV price × rate at that month
+  const purchasesSorted = [...purchases].sort((a,b) => a.purchase_date.localeCompare(b.purchase_date));
   const ctx2 = document.getElementById('c2').getContext('2d');
   if (chart2) chart2.destroy();
+
+  if (!purchasesSorted.length) {
+    // No actual purchases yet — show nothing
+    chart2 = null;
+    return;
+  }
+
+  // Build value per month: shares held at that time × IVV price × rate
+  const data2 = sorted.map(r => {
+    const monthDate = `${r.year}-${String(r.month).padStart(2,'0')}-15`;
+    const sharesHeld = purchasesSorted
+      .filter(p => p.purchase_date <= monthDate)
+      .reduce((s, p) => s + p.shares, 0);
+    return sharesHeld > 0 ? sharesHeld * r.ivv_price_usd * r.usd_ils_rate : 0;
+  });
+
   chart2 = new Chart(ctx2, {
     type: 'line',
-    data: { labels, datasets: [{ data: sorted.map(r => r.cumulative_shares * r.ivv_price_usd * (liveILSrate || r.usd_ils_rate)),
+    data: { labels, datasets: [{ data: data2,
       borderColor: FF.colors.green, backgroundColor: FF.gradient(ctx2, FF.colors.green),
       tension: 0.4, fill: true, pointRadius: 3 }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
