@@ -149,25 +149,28 @@ async function loadAll() {
 
 // ── KPIs — Current Value based on ACTUAL purchases ──
 function updateKPIs() {
-  if (!entries.length) return;
+  if (!entries.length && !purchases.length) return;
   const sorted = [...entries].sort((a,b) => a.year-b.year || a.month-b.month);
-  const last = sorted[sorted.length-1];
-  const totalILS  = sorted.reduce((s,r) => s + r.ils_invested, 0);
-  const rate      = liveILSrate || last.usd_ils_rate;
+  const last = sorted.length ? sorted[sorted.length-1] : null;
+  const rate = liveILSrate || (last ? last.usd_ils_rate : 3.7);
 
-  // Current value = actual shares held × live IVV price
-  const actualShares = purchases.reduce((s,p) => s + p.shares, 0);
-  const curValUSD = liveIVV && actualShares ? actualShares * liveIVV : null;
-  const curValILS = curValUSD ? curValUSD * rate : null;
+  // Current value = actual shares held × live IVV price × rate
+  const actualShares   = purchases.reduce((s,p) => s + p.shares, 0);
+  const curValUSD      = liveIVV && actualShares ? actualShares * liveIVV : null;
+  const curValILS      = curValUSD ? curValUSD * rate : null;
 
-  // Gain = current value - cost of actual purchases
-  const actualCostUSD = purchases.reduce((s,p) => s + p.shares * p.price_usd, 0);
-  const gainILS = curValILS ? (curValUSD - actualCostUSD) * rate : null;
+  // Total Invested = sum of (shares × price × rate) for each actual purchase
+  const totalInvestedILS = purchases.reduce((s,p) => s + p.shares * p.price_usd * rate, 0);
 
-  document.getElementById('kpi-shares').textContent    = last.cumulative_shares.toFixed(6);
+  // Gain = Current Value (ILS) - Total Invested (ILS)
+  const gainILS = curValILS !== null ? curValILS - totalInvestedILS : null;
+
+  if (last) {
+    document.getElementById('kpi-shares').textContent  = last.cumulative_shares.toFixed(6);
+    document.getElementById('kpi-months').textContent  = sorted.length;
+  }
   document.getElementById('kpi-value-ils').textContent = curValILS ? FF.ils(curValILS) : '—';
-  document.getElementById('kpi-invested').textContent  = FF.ils(totalILS);
-  document.getElementById('kpi-months').textContent    = sorted.length;
+  document.getElementById('kpi-invested').textContent  = purchases.length ? FF.ils(totalInvestedILS) : '—';
 
   if (gainILS !== null) {
     const el = document.getElementById('kpi-gain');
