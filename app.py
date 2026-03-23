@@ -116,6 +116,7 @@ def init_db():
         f'CREATE TABLE IF NOT EXISTS mortgage_entry (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, remaining_balance REAL NOT NULL)',
         f'CREATE TABLE IF NOT EXISTS stock_holding (id {ID_TYPE}, symbol TEXT NOT NULL, purchase_price REAL NOT NULL, quantity REAL NOT NULL, purchase_date TEXT DEFAULT \'\', notes TEXT DEFAULT \'\')',
         f'CREATE TABLE IF NOT EXISTS daughter_investment (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, ils_invested REAL NOT NULL, usd_ils_rate REAL NOT NULL, ivv_price_usd REAL NOT NULL, shares_purchased REAL NOT NULL, cumulative_shares REAL NOT NULL)',
+        f'CREATE TABLE IF NOT EXISTS ivv_actual_purchase (id {ID_TYPE}, purchase_date TEXT NOT NULL, shares REAL NOT NULL, price_usd REAL NOT NULL)',
     ]:
         run_ddl(conn, sql)
     close_db(conn)
@@ -571,6 +572,114 @@ def _recompute_daughter():
         c += r['shares_purchased']
         run(conn,'UPDATE daughter_investment SET cumulative_shares=? WHERE id=?',(round(c,6),r['id']))
     close_db(conn)
+
+# ── Auto-accumulation: fill missing months up to today ────────────
+@app.route('/api/daughter/auto-accumulate', methods=['POST'])
+@auth_required
+def auto_accumulate():
+    """Auto-fill any months from start_year/month up to today (15th) that are missing."""
+    import calendar
+    from datetime import date as dt, datetime as dtime
+    today = dt.today()
+    d = request.json or {}
+    start_year  = int(d.get('start_year',  2024))
+    start_month = int(d.get('start_month', 1))
+    ils_per_month = float(d.get('ils_per_month', 300))
+
+    conn = get_db()
+    existing = q(conn, 'SELECT year, month FROM daughter_investment')
+    existing_set = {(r['year'], r['month']) for r in existing}
+    close_db(conn)
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://finance.yahoo.com',
+    }
+
+    added = []
+    errors = []
+    year, month = start_year, start_month
+    epoch = dt(1970, 1, 1)
+
+    while (year, month) <= (today.year, today.month):
+        # Only process if past the 15th (data should be available)
+        cutoff = dt(year, month, 15)
+        if today < cutoff:
+            break
+        if (year, month) not in existing_set:
+            # Fetch IVV price around the 15th
+            td = min(15, calendar.monthrange(year, month)[1])
+            target = dt(year, month, td)
+            p1 = int((target - epoch).days) * 86400 - 3 * 86400
+            p2 = int((target - epoch).days) * 86400 + 5 * 86400
+            ivv_price = None; rate = None
+            for host in ['query1', 'query2']:
+                try:
+                    url = f'https://{host}.finance.yahoo.com/v8/finance/chart/IVV?interval=1d&period1={p1}&period2={p2}'
+                    rd = req_lib.get(url, timeout=10, headers=headers).json()['chart']['result'][0]
+                    closes = [c for c in rd['indicators']['quote'][0].get('close',[]) if c]
+                    ivv_price = float(closes[-1]) if closes else float(rd['meta'].get('regularMarketPrice', 0))
+                    if ivv_price: break
+                except: continue
+            for host in ['query1', 'query2']:
+                try:
+                    url = f'https://{host}.finance.yahoo.com/v8/finance/chart/USDILS=X?interval=1d&period1={p1}&period2={p2}'
+                    rd = req_lib.get(url, timeout=10, headers=headers).json()['chart']['result'][0]
+                    closes = [c for c in rd['indicators']['quote'][0].get('close',[]) if c]
+                    rate = float(closes[-1]) if closes else float(rd['meta'].get('regularMarketPrice', 0))
+                    if rate: break
+                except: continue
+            if not rate:
+                try: rate = float(req_lib.get('https://open.er-api.com/v6/latest/USD', timeout=8).json()['rates']['ILS'])
+                except: pass
+            if ivv_price and rate and ivv_price > 0 and rate > 0:
+                shares = round((ils_per_month / rate) / ivv_price, 6)
+                conn2 = get_db()
+                existing2 = q(conn2, 'SELECT * FROM daughter_investment ORDER BY year,month')
+                prior = 0.0
+                for r in existing2:
+                    if (r['year'], r['month']) < (year, month): prior = r['cumulative_shares']
+                cumulative = round(prior + shares, 6)
+                run(conn2, 'INSERT INTO daughter_investment (year,month,ils_invested,usd_ils_rate,ivv_price_usd,shares_purchased,cumulative_shares) VALUES (?,?,?,?,?,?,?)',
+                    (year, month, ils_per_month, rate, ivv_price, shares, cumulative))
+                close_db(conn2)
+                existing_set.add((year, month))
+                added.append(f'{year}-{month:02d}')
+            else:
+                errors.append(f'{year}-{month:02d}: ivv={ivv_price} rate={rate}')
+        # Next month
+        month += 1
+        if month > 12: month = 1; year += 1
+
+    _recompute_daughter()
+    return jsonify({'added': added, 'errors': errors, 'total_added': len(added)})
+
+# ── IVV Actual Purchases ───────────────────────────────────────────
+@app.route('/api/ivv-purchases', methods=['GET'])
+@auth_required
+def get_ivv_purchases():
+    conn = get_db()
+    r = q(conn, 'SELECT * FROM ivv_actual_purchase ORDER BY purchase_date DESC')
+    close_db(conn)
+    return jsonify(r)
+
+@app.route('/api/ivv-purchases', methods=['POST'])
+@auth_required
+def add_ivv_purchase():
+    d = request.json; conn = get_db()
+    run(conn, 'INSERT INTO ivv_actual_purchase (purchase_date,shares,price_usd) VALUES (?,?,?)',
+        (d['purchase_date'], float(d['shares']), float(d['price_usd'])))
+    close_db(conn)
+    return jsonify({'status':'ok'})
+
+@app.route('/api/ivv-purchases/<int:pid>', methods=['DELETE'])
+@auth_required
+def delete_ivv_purchase(pid):
+    conn = get_db()
+    run(conn, 'DELETE FROM ivv_actual_purchase WHERE id=?', (pid,))
+    close_db(conn)
+    return jsonify({'status':'ok'})
 
 # ── Export / Import ───────────────────────────────────────────────
 @app.route('/api/export', methods=['GET'])
