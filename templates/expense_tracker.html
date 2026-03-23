@@ -170,25 +170,28 @@ function buildMultiChart(){
   const ctx = document.getElementById('multi-chart').getContext('2d');
   if(multiChart) multiChart.destroy();
 
-  const datasets = trackedExps
-    .filter(exp => summaryData[exp])
-    .map((exp, i) => ({
-      label: exp,
-      data: Array.from({length:12},(_,m)=>summaryData[exp]?.[m+1]||0),
-      borderColor: PALETTE[i % PALETTE.length],
-      backgroundColor: 'transparent',
-      tension: 0.4, pointRadius: 4, pointHoverRadius: 6,
-      borderWidth: 2
-    }));
+  const active = trackedExps.filter(exp => summaryData[exp]);
+  if(!active.length){ multiChart = null; buildPills(); return; }
 
-  if(!datasets.length){
-    multiChart = null;
-    return;
-  }
+  // Only include months where at least one tracked expense has a value > 0
+  const activeMonths = Array.from({length:12},(_,i)=>i+1).filter(m =>
+    active.some(exp => (summaryData[exp]?.[m] || 0) > 0)
+  );
+
+  if(!activeMonths.length){ multiChart = null; buildPills(); return; }
+
+  const datasets = active.map((exp, i) => ({
+    label: exp,
+    data: activeMonths.map(m => summaryData[exp]?.[m] || 0),
+    borderColor: PALETTE[trackedExps.indexOf(exp) % PALETTE.length],
+    backgroundColor: 'transparent',
+    tension: 0.4, pointRadius: 4, pointHoverRadius: 6,
+    borderWidth: 2
+  }));
 
   multiChart = new Chart(ctx, {
     type: 'line',
-    data: { labels: MONTHS, datasets },
+    data: { labels: activeMonths.map(m => MONTHS[m-1]), datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
@@ -197,7 +200,6 @@ function buildMultiChart(){
     }
   });
 
-  // Build pills
   buildPills();
 }
 
