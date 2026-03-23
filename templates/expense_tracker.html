@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Expense Tracker{% endblock %}
 {% block page_title %}Expense Tracker{% endblock %}
-{% block page_subtitle %}Track each expense across 12 months{% endblock %}
+{% block page_subtitle %}Track expenses across months{% endblock %}
 
 {% block content %}
 <div class="page-body">
@@ -12,25 +12,43 @@
     <button class="btn btn-primary btn-sm" id="load-btn">Load</button>
   </div>
 
-  <!-- KPI row -->
   <div class="kpi-grid" id="kpi-row" style="margin-bottom:24px"></div>
 
-  <!-- Line chart for selected expense -->
-  <div class="card mb-24" id="chart-card" style="display:none">
-    <div class="flex-between mb-16">
+  <!-- Always-visible multi-line trend chart -->
+  <div class="card mb-24">
+    <div class="flex-between mb-12">
       <div>
-        <div class="card-title" id="chart-title">Expense Trend</div>
-        <div class="card-subtitle">12-month view</div>
+        <div class="card-title">Expense Trends</div>
+        <div class="card-subtitle">Monthly change over time — click to add/remove lines</div>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="clearSelection()">&#x2715; Close</button>
+      <div id="tracked-pills" style="display:flex;flex-wrap:wrap;gap:6px;max-width:500px;justify-content:flex-end"></div>
     </div>
-    <div class="chart-wrap"><canvas id="trend-canvas"></canvas></div>
+    <div class="chart-wrap" style="height:280px"><canvas id="multi-chart"></canvas></div>
+    <!-- Add expense to track -->
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="add-tracked-sel" class="form-input" style="width:280px;font-size:13px">
+        <option value="">— add expense to track —</option>
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick="addTracked()">+ Add Line</button>
+    </div>
   </div>
 
-  <!-- Main table: expenses × months -->
+  <!-- Table -->
   <div class="card">
-    <div class="card-title mb-4">Monthly Breakdown</div>
-    <div class="card-subtitle mb-16">Click any expense row to see its 12-month trend</div>
+    <div class="flex-between mb-12">
+      <div>
+        <div class="card-title">Monthly Breakdown</div>
+        <div class="card-subtitle">Click any row to toggle it on the chart above</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="font-size:12px;color:var(--text3)">Sort by:</label>
+        <select id="sort-select" class="form-input" style="width:130px;font-size:13px" onchange="buildTable(+ySel.value)">
+          <option value="name">Name</option>
+          <option value="total" selected>Total (high→low)</option>
+          <option value="avg">Monthly Average</option>
+        </select>
+      </div>
+    </div>
     <div class="table-wrap" id="table-wrap"></div>
   </div>
 
@@ -39,10 +57,14 @@
 
 {% block scripts %}
 <script>
-let summaryData = {}, selectedExp = null, trendChart = null;
+let summaryData = {}, multiChart = null;
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const PALETTE = ['#5b8df6','#4caf88','#c9a84c','#e05c6a','#9b7cf8','#4cc9c9','#f08c4b','#e87dbd','#7dc8e8','#a8d86e','#e8c96a','#5dcaa5'];
 
-// Populate year picker — default to current year
+// Default tracked expenses
+let trackedExps = ['משכנתא','מצרכי מזון','דלק לרכב','אוכל בחוץ (מסעדות, בתי קפה, משלוחים)'];
+
+// Year picker
 const curY = new Date().getFullYear();
 const ySel = document.getElementById('year-picker');
 for(let y = curY; y >= curY - 4; y--){
@@ -54,7 +76,6 @@ for(let y = curY; y >= curY - 4; y--){
 
 async function loadData(){
   const year = +ySel.value;
-  // Fetch all 12 months for this year
   const allRows = [];
   for(let m = 1; m <= 12; m++){
     const data = await FF.get(`/api/transactions?year=${year}&month=${m}`);
@@ -63,117 +84,175 @@ async function loadData(){
       allRows.push({month:m, desc, amount:r.amount||0});
     });
   }
-
-  // Build summary: {desc: {1:amt, 2:amt, ...}}
   summaryData = {};
   allRows.forEach(r=>{
     if(!summaryData[r.desc]) summaryData[r.desc] = {};
     summaryData[r.desc][r.month] = (summaryData[r.desc][r.month]||0) + r.amount;
   });
-
   buildKPIs(year);
   buildTable(year);
-  if(selectedExp) showTrend(selectedExp);
+  buildMultiChart();
+  populateAddSelect();
 }
 
 function buildKPIs(year){
-  const kpiRow = document.getElementById('kpi-row');
-  const totals = Array.from({length:12},(_,i)=>{
-    return Object.values(summaryData).reduce((s,v)=>s+(v[i+1]||0),0);
-  });
-  const maxMonth = totals.indexOf(Math.max(...totals.filter(v=>v>0)));
-  const minMonth = totals.indexOf(Math.min(...totals.filter(v=>v>0)));
-  const avg = totals.filter(v=>v>0).reduce((s,v)=>s+v,0) / (totals.filter(v=>v>0).length||1);
+  const totals = Array.from({length:12},(_,i)=>Object.values(summaryData).reduce((s,v)=>s+(v[i+1]||0),0));
+  const nonZero = totals.filter(v=>v>0);
+  const maxIdx = totals.indexOf(Math.max(...nonZero));
+  const minIdx = totals.indexOf(Math.min(...nonZero));
+  const avg = nonZero.reduce((s,v)=>s+v,0)/(nonZero.length||1);
   const total = totals.reduce((s,v)=>s+v,0);
-  kpiRow.innerHTML = `
+  document.getElementById('kpi-row').innerHTML = `
     <div class="kpi-card"><div class="kpi-label">Total ${year}</div><div class="kpi-value" style="font-size:20px">${FF.ils(total)}</div></div>
     <div class="kpi-card"><div class="kpi-label">Monthly Average</div><div class="kpi-value" style="font-size:20px">${FF.ils(avg)}</div></div>
-    <div class="kpi-card green"><div class="kpi-label">Lowest Month</div><div class="kpi-value green" style="font-size:20px">${FF.ils(totals[minMonth])}</div><div class="kpi-sub">${MONTHS[minMonth]}</div></div>
-    <div class="kpi-card red"><div class="kpi-label">Highest Month</div><div class="kpi-value red" style="font-size:20px">${FF.ils(totals[maxMonth])}</div><div class="kpi-sub">${MONTHS[maxMonth]}</div></div>`;
+    <div class="kpi-card green"><div class="kpi-label">Lowest Month</div><div class="kpi-value green" style="font-size:20px">${FF.ils(totals[minIdx])}</div><div class="kpi-sub">${MONTHS[minIdx]||''}</div></div>
+    <div class="kpi-card red"><div class="kpi-label">Highest Month</div><div class="kpi-value red" style="font-size:20px">${FF.ils(totals[maxIdx])}</div><div class="kpi-sub">${MONTHS[maxIdx]||''}</div></div>`;
 }
 
 function buildTable(year){
   const wrap = document.getElementById('table-wrap');
-  const expenses = Object.keys(summaryData).sort();
-  if(!expenses.length){
-    wrap.innerHTML='<div class="empty-state"><p>No expense data for this year yet.</p></div>';
-    return;
+  let expenses = Object.keys(summaryData);
+  if(!expenses.length){ wrap.innerHTML='<div class="empty-state"><p>No expense data for this year yet.</p></div>'; return; }
+
+  // Sort
+  const sort = document.getElementById('sort-select').value;
+  if(sort === 'total'){
+    expenses.sort((a,b)=>Object.values(summaryData[b]).reduce((s,v)=>s+v,0)-Object.values(summaryData[a]).reduce((s,v)=>s+v,0));
+  } else if(sort === 'avg'){
+    expenses.sort((a,b)=>{
+      const avgA = Object.values(summaryData[a]).reduce((s,v)=>s+v,0)/(Object.keys(summaryData[a]).length||1);
+      const avgB = Object.values(summaryData[b]).reduce((s,v)=>s+v,0)/(Object.keys(summaryData[b]).length||1);
+      return avgB - avgA;
+    });
+  } else {
+    expenses.sort();
   }
 
-  // Monthly totals row
-  const monthTotals = Array.from({length:12},(_,i)=>
-    expenses.reduce((s,e)=>s+(summaryData[e][i+1]||0),0)
-  );
+  const monthTotals = Array.from({length:12},(_,i)=>expenses.reduce((s,e)=>s+(summaryData[e][i+1]||0),0));
 
   let html = '<table style="width:100%;min-width:900px"><thead><tr>';
-  html += '<th style="text-align:left;position:sticky;left:0;background:var(--bg2);z-index:2;min-width:180px">Expense</th>';
-  MONTHS.forEach(m => html += `<th style="text-align:right;min-width:80px">${m}</th>`);
+  html += '<th style="text-align:left;position:sticky;left:0;background:var(--bg2);z-index:2;min-width:200px">Expense</th>';
+  MONTHS.forEach(m => html += `<th style="text-align:right;min-width:75px">${m}</th>`);
   html += '<th style="text-align:right;min-width:90px">Total</th></tr></thead><tbody>';
 
   expenses.forEach(exp=>{
     const months = summaryData[exp];
     const total = Object.values(months).reduce((s,v)=>s+v,0);
-    if(total === 0) return; // hide zero rows
-    const isSelected = selectedExp === exp;
-    html += `<tr onclick="showTrend('${exp.replace(/'/g,"\\'")}') " style="cursor:pointer;${isSelected?'background:var(--accent-dim);':''}" class="exp-row">`;
-    html += `<td style="position:sticky;left:0;background:${isSelected?'var(--accent-dim)':'var(--surface)'};z-index:1;font-size:13px;direction:rtl;text-align:right;padding:10px 14px">${exp}</td>`;
+    if(total === 0) return;
+    const isTracked = trackedExps.includes(exp);
+    const trackIdx = trackedExps.indexOf(exp);
+    const dotColor = isTracked ? PALETTE[trackIdx % PALETTE.length] : 'transparent';
+    html += `<tr onclick="toggleTracked('${exp.replace(/'/g,"\\'")}')" style="cursor:pointer" class="exp-row">`;
+    html += `<td style="position:sticky;left:0;background:var(--surface);z-index:1;padding:8px 14px">
+      <div style="display:flex;align-items:center;gap:8px;direction:rtl">
+        <span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0;border:1px solid var(--border2)"></span>
+        <span style="font-size:13px">${exp}</span>
+      </div></td>`;
     for(let m=1;m<=12;m++){
       const v = months[m]||0;
       const max = Math.max(...Object.values(months));
-      const intensity = max>0 ? v/max : 0;
-      const bg = intensity>0 ? `rgba(224,92,106,${intensity*0.4})` : 'transparent';
-      html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;background:${bg}">${v>0?FF.ils(v):'—'}</td>`;
+      const bg = v>0 ? `rgba(224,92,106,${(v/max)*0.35})` : 'transparent';
+      html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;background:${bg};padding:8px 10px">${v>0?FF.ils(v):'—'}</td>`;
     }
-    html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:500;color:var(--red)">${FF.ils(total)}</td>`;
+    html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:500;color:var(--red);padding:8px 10px">${FF.ils(total)}</td>`;
     html += '</tr>';
   });
 
-  // Totals row
   html += '<tr style="border-top:2px solid var(--border2)">';
   html += '<td style="position:sticky;left:0;background:var(--bg3);z-index:1;font-size:12px;font-weight:500;color:var(--text2);padding:10px 14px">Total</td>';
-  monthTotals.forEach(v=>{
-    html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:500;color:var(--text)">${v>0?FF.ils(v):'—'}</td>`;
-  });
+  monthTotals.forEach(v=>{ html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:500">${v>0?FF.ils(v):'—'}</td>`; });
   html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:600;color:var(--accent)">${FF.ils(monthTotals.reduce((s,v)=>s+v,0))}</td>`;
   html += '</tr></tbody></table>';
   wrap.innerHTML = html;
 }
 
-function showTrend(exp){
-  selectedExp = exp;
-  const months = summaryData[exp] || {};
-  const data = Array.from({length:12},(_,i)=>months[i+1]||0);
-  document.getElementById('chart-card').style.display = 'block';
-  document.getElementById('chart-title').textContent = exp;
-  const ctx = document.getElementById('trend-canvas').getContext('2d');
-  if(trendChart) trendChart.destroy();
-  trendChart = new Chart(ctx,{
-    type:'bar',
-    data:{
-      labels: MONTHS,
-      datasets:[{
-        label: exp,
-        data,
-        backgroundColor: data.map(v=>v>0?'rgba(224,92,106,0.7)':'rgba(224,92,106,0.1)'),
-        borderRadius: 4
-      }]
-    },
-    options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false}},
-      scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(1)+'k'}}}}
+function buildMultiChart(){
+  const ctx = document.getElementById('multi-chart').getContext('2d');
+  if(multiChart) multiChart.destroy();
+
+  const datasets = trackedExps
+    .filter(exp => summaryData[exp])
+    .map((exp, i) => ({
+      label: exp,
+      data: Array.from({length:12},(_,m)=>summaryData[exp]?.[m+1]||0),
+      borderColor: PALETTE[i % PALETTE.length],
+      backgroundColor: 'transparent',
+      tension: 0.4, pointRadius: 4, pointHoverRadius: 6,
+      borderWidth: 2
+    }));
+
+  if(!datasets.length){
+    multiChart = null;
+    return;
+  }
+
+  multiChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: MONTHS, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { ticks: { callback: v => '₪'+(v/1000).toFixed(1)+'k' } } },
+      interaction: { mode: 'index', intersect: false }
+    }
   });
-  buildTable(+ySel.value); // re-render to highlight selected row
-  document.getElementById('chart-card').scrollIntoView({behavior:'smooth',block:'nearest'});
+
+  // Build pills
+  buildPills();
 }
 
-function clearSelection(){
-  selectedExp = null;
-  document.getElementById('chart-card').style.display = 'none';
-  if(trendChart){trendChart.destroy();trendChart=null;}
+function buildPills(){
+  const pills = document.getElementById('tracked-pills');
+  pills.innerHTML = '';
+  trackedExps.forEach((exp, i) => {
+    const color = PALETTE[i % PALETTE.length];
+    const pill = document.createElement('div');
+    pill.style.cssText = `display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid ${color};color:${color};background:${color}22`;
+    pill.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:${color}"></span>${exp}<span style="opacity:0.7;margin-left:2px">×</span>`;
+    pill.onclick = () => { trackedExps = trackedExps.filter(e=>e!==exp); buildMultiChart(); buildTable(+ySel.value); populateAddSelect(); };
+    pills.appendChild(pill);
+  });
+}
+
+function toggleTracked(exp){
+  if(trackedExps.includes(exp)){
+    trackedExps = trackedExps.filter(e=>e!==exp);
+  } else {
+    if(trackedExps.length >= 12){ FF.toast('Max 12 lines', 'error'); return; }
+    trackedExps.push(exp);
+  }
+  buildMultiChart();
   buildTable(+ySel.value);
+  populateAddSelect();
+}
+
+function addTracked(){
+  const sel = document.getElementById('add-tracked-sel');
+  const exp = sel.value;
+  if(!exp) return;
+  if(!trackedExps.includes(exp)){
+    if(trackedExps.length >= 12){ FF.toast('Max 12 lines', 'error'); return; }
+    trackedExps.push(exp);
+    buildMultiChart();
+    buildTable(+ySel.value);
+    populateAddSelect();
+  }
+  sel.value = '';
+}
+
+function populateAddSelect(){
+  const sel = document.getElementById('add-tracked-sel');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— add expense to track —</option>';
+  Object.keys(summaryData).filter(e=>!trackedExps.includes(e)).sort().forEach(e=>{
+    const o = document.createElement('option');
+    o.value = e; o.textContent = e;
+    sel.appendChild(o);
+  });
+  sel.value = current;
 }
 
 document.getElementById('load-btn').addEventListener('click', loadData);
-loadData(); // Auto-load current year on open
+loadData();
 </script>
 {% endblock %}
