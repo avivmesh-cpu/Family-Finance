@@ -8,9 +8,10 @@
 
   <div class="kpi-grid">
     <div class="kpi-card green"><div class="kpi-label">Total Shares</div><div class="kpi-value green" id="kpi-shares">—</div></div>
-    <div class="kpi-card"><div class="kpi-label">Current Value</div><div class="kpi-value" id="kpi-value">—</div></div>
-    <div class="kpi-card blue"><div class="kpi-label">Total Invested</div><div class="kpi-value blue" id="kpi-invested">—</div></div>
-    <div class="kpi-card"><div class="kpi-label">Gain (USD)</div><div class="kpi-value" id="kpi-gain">—</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">Current Value (ILS)</div><div class="kpi-value blue" id="kpi-value-ils">—</div></div>
+    <div class="kpi-card"><div class="kpi-label">Total Invested (ILS)</div><div class="kpi-value" id="kpi-invested">—</div></div>
+    <div class="kpi-card"><div class="kpi-label">Portfolio Value (ILS)</div><div class="kpi-value" id="kpi-portfolio-ils">—</div></div>
+    <div class="kpi-card"><div class="kpi-label">Gain (ILS)</div><div class="kpi-value" id="kpi-gain">—</div></div>
     <div class="kpi-card"><div class="kpi-label">Months</div><div class="kpi-value" id="kpi-months">0</div></div>
   </div>
 
@@ -91,7 +92,7 @@
 {% block scripts %}
 <script>
 let entries = [];
-let chart1 = null, chart2 = null, liveIVV = null;
+let chart1 = null, chart2 = null, liveIVV = null, liveILSrate = null;
 
 function showStatus(msg, ok) {
   const el = document.getElementById('status-msg');
@@ -197,12 +198,13 @@ async function loadHistory() {
   const resp = await fetch('/api/daughter');
   entries = await resp.json();
 
-  // Also get live price for KPI
+  // Get live IVV price and USD/ILS rate
   try {
     const liveResp = await fetch('/api/daughter/fetch-prices');
     const liveData = await liveResp.json();
-    liveIVV = liveData.ivv_price || null;
-  } catch(e) { liveIVV = null; }
+    liveIVV    = liveData.ivv_price    || null;
+    liveILSrate = liveData.usd_ils_rate || null;
+  } catch(e) { liveIVV = null; liveILSrate = null; }
 
   renderTable();
   updateKPIs();
@@ -237,20 +239,24 @@ function updateKPIs() {
   if (!entries.length) return;
   const sorted = [...entries].sort((a, b) => a.year - b.year || a.month - b.month);
   const last = sorted[sorted.length - 1];
-  const totalILS = sorted.reduce((s, r) => s + r.ils_invested, 0);
-  const totalUSD = sorted.reduce((s, r) => s + (r.ils_invested / r.usd_ils_rate), 0);
-  const curVal   = liveIVV ? last.cumulative_shares * liveIVV : null;
-  const gain     = curVal  ? curVal - totalUSD : null;
+  const totalILS   = sorted.reduce((s, r) => s + r.ils_invested, 0);
+  const totalUSD   = sorted.reduce((s, r) => s + (r.ils_invested / r.usd_ils_rate), 0);
+  const curValUSD  = liveIVV ? last.cumulative_shares * liveIVV : null;
+  const rate       = liveILSrate || last.usd_ils_rate; // fallback to last known rate
+  const curValILS  = curValUSD ? curValUSD * rate : null;
+  const gainUSD    = curValUSD ? curValUSD - totalUSD : null;
+  const gainILS    = gainUSD   ? gainUSD * rate : null;
 
-  document.getElementById('kpi-shares').textContent   = last.cumulative_shares.toFixed(6);
-  document.getElementById('kpi-value').textContent     = curVal ? '$' + FF.dec(curVal) : '—';
-  document.getElementById('kpi-invested').textContent  = FF.ils(totalILS);
-  document.getElementById('kpi-months').textContent    = sorted.length;
+  document.getElementById('kpi-shares').textContent      = last.cumulative_shares.toFixed(6);
+  document.getElementById('kpi-value-ils').textContent    = curValILS  ? FF.ils(curValILS)        : '—';
+  document.getElementById('kpi-portfolio-ils').textContent = curValILS ? FF.ils(curValILS)        : '—';
+  document.getElementById('kpi-invested').textContent     = FF.ils(totalILS);
+  document.getElementById('kpi-months').textContent       = sorted.length;
 
-  if (gain !== null) {
+  if (gainILS !== null) {
     const el = document.getElementById('kpi-gain');
-    el.textContent  = (gain >= 0 ? '+' : '') + ' $' + FF.dec(gain);
-    el.className    = 'kpi-value ' + (gain >= 0 ? 'green' : 'red');
+    el.textContent = (gainILS >= 0 ? '+' : '') + FF.ils(gainILS);
+    el.className   = 'kpi-value ' + (gainILS >= 0 ? 'green' : 'red');
   }
 }
 
