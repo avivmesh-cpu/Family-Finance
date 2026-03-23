@@ -174,46 +174,12 @@ async function doSave() {
   const btn = document.getElementById('save-btn');
   btn.textContent = 'Saving...'; btn.disabled = true;
   try {
-    // Delete marked rows
     for (const h of holdings.filter(x => x._del && !x._new))
       await FF.del('/api/stocks/' + h.id);
-
-    // Merge duplicates: group new+existing by symbol, weighted avg
-    const toSave = holdings.filter(x => !x._del && x.symbol);
-    const merged = {};
-    for (const h of toSave) {
-      const sym = h.symbol.toUpperCase();
-      if (!merged[sym]) {
-        merged[sym] = { ...h, symbol: sym, _ids: h._new ? [] : [h.id] };
-      } else {
-        // Weighted average
-        const totalQty = merged[sym].quantity + h.quantity;
-        merged[sym].purchase_price = totalQty > 0
-          ? (merged[sym].purchase_price * merged[sym].quantity + h.purchase_price * h.quantity) / totalQty
-          : merged[sym].purchase_price;
-        merged[sym].quantity = totalQty;
-        if (!h._new) merged[sym]._ids.push(h.id);
-      }
-    }
-
-    // Delete extra rows for same symbol (keep only first id per symbol)
-    for (const sym of Object.keys(merged)) {
-      const ids = merged[sym]._ids;
-      for (let i = 1; i < ids.length; i++) await FF.del('/api/stocks/' + ids[i]);
-    }
-
-    // Save each merged symbol
-    for (const sym of Object.keys(merged)) {
-      const h = merged[sym];
-      if (h._ids.length === 0) {
-        // New row
-        await FF.post('/api/stocks', { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
-      } else {
-        // Update existing
-        await FF.put('/api/stocks/' + h._ids[0], { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
-      }
-    }
-
+    for (const h of holdings.filter(x => !x._del && x._new && x.symbol))
+      await FF.post('/api/stocks', { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
+    for (const h of holdings.filter(x => !x._del && !x._new))
+      await FF.put('/api/stocks/' + h.id, { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
     FF.toast('Saved!');
     await init();
   } catch(e) { FF.toast('Error: ' + e.message, 'error'); }
@@ -240,17 +206,41 @@ function updateKPIs() {
 }
 
 function buildCharts() {
-  const active = holdings.filter(h => !h._del);
-  const syms = active.map(h => (h.symbol || '').toUpperCase()).filter(Boolean);
-  const vals = active.map(h => { const s = (h.symbol || '').toUpperCase(); return prices[s] ? h.quantity * prices[s] : h.quantity * h.purchase_price; });
-  const cols = [FF.colors.gold, FF.colors.blue, FF.colors.green, FF.colors.purple, FF.colors.teal, FF.colors.red];
+  const active = holdings.filter(h => !h._del && h.symbol);
+
+  // Merge duplicates by symbol for charts only (table stays as-is)
+  const merged = {};
+  for (const h of active) {
+    const sym = (h.symbol || '').toUpperCase();
+    if (!merged[sym]) {
+      merged[sym] = { symbol: sym, quantity: 0, totalCost: 0 };
+    }
+    merged[sym].quantity  += (+h.quantity || 0);
+    merged[sym].totalCost += (+h.quantity || 0) * (+h.purchase_price || 0);
+  }
+  const syms   = Object.keys(merged);
+  const vals   = syms.map(s => prices[s] ? merged[s].quantity * prices[s] : merged[s].totalCost);
+  const pnlD   = syms.map(s => prices[s] ? merged[s].quantity * prices[s] - merged[s].totalCost : 0);
+  const cols   = [FF.colors.gold, FF.colors.blue, FF.colors.green, FF.colors.purple, FF.colors.teal, FF.colors.red];
+
   const c1 = document.getElementById('c-alloc').getContext('2d');
   if (aC) aC.destroy();
-  if (syms.length) aC = new Chart(c1, { type: 'doughnut', data: { labels: syms, datasets: [{ data: vals, backgroundColor: cols.slice(0, syms.length), borderWidth: 2, borderColor: '#1f2434' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } } });
-  const pnlD = active.map(h => { const s = (h.symbol || '').toUpperCase(); const p = prices[s]; return p ? h.quantity * p - h.quantity * h.purchase_price : 0; });
+  if (syms.length) aC = new Chart(c1, {
+    type: 'doughnut',
+    data: { labels: syms, datasets: [{ data: vals, backgroundColor: cols.slice(0, syms.length), borderWidth: 2, borderColor: '#1f2434' }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+  });
+
   const c2 = document.getElementById('c-pnl').getContext('2d');
   if (pC) pC.destroy();
-  if (syms.length) pC = new Chart(c2, { type: 'bar', data: { labels: syms, datasets: [{ data: pnlD, backgroundColor: pnlD.map(v => v >= 0 ? 'rgba(76,175,136,0.75)' : 'rgba(224,92,106,0.75)'), borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '$' + v.toFixed(0) } } } } });
+  if (syms.length) pC = new Chart(c2, {
+    type: 'bar',
+    data: { labels: syms, datasets: [{ data: pnlD,
+      backgroundColor: pnlD.map(v => v >= 0 ? 'rgba(76,175,136,0.75)' : 'rgba(224,92,106,0.75)'),
+      borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { y: { ticks: { callback: v => '$' + v.toFixed(0) } } } }
+  });
 }
 
 init();
