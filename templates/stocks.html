@@ -13,6 +13,13 @@
     <div class="kpi-card"><div class="kpi-label">Holdings</div><div class="kpi-value" id="kpi-cnt">0</div></div>
   </div>
 
+  <!-- Portfolio over time chart -->
+  <div class="card mb-24">
+    <div class="card-title mb-4">Portfolio Value Over Time</div>
+    <div class="card-subtitle mb-16">Cumulative cost basis as positions were added</div>
+    <div class="chart-wrap" style="height:240px"><canvas id="c-timeline"></canvas></div>
+  </div>
+
   <div class="grid-2 mb-24">
     <div class="card"><div class="card-title mb-16">Allocation</div><div class="chart-wrap"><canvas id="c-alloc"></canvas></div></div>
     <div class="card"><div class="card-title mb-16">P&amp;L per Position</div><div class="chart-wrap"><canvas id="c-pnl"></canvas></div></div>
@@ -22,7 +29,7 @@
     <div class="flex-between mb-16">
       <div>
         <div class="card-title">Holdings</div>
-        <div class="card-subtitle">1. Enter details &rarr; 2. Save All &rarr; 3. Prices load automatically</div>
+        <div class="card-subtitle">Enter details → Save All → prices load automatically</div>
       </div>
       <div class="flex gap-8">
         <button class="btn btn-ghost btn-sm" id="refresh-btn" onclick="doRefreshPrices()">&#8635; Refresh Prices</button>
@@ -36,7 +43,7 @@
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Symbol</th><th>Qty</th><th>Avg Cost ($)</th>
+          <th>Symbol</th><th>Date</th><th>Qty</th><th>Avg Cost ($)</th>
           <th>Current ($)</th><th>Cost Basis ($)</th><th>Value ($)</th>
           <th>P&amp;L ($)</th><th>P&amp;L %</th><th>Notes</th><th></th>
         </tr></thead>
@@ -49,46 +56,31 @@
 
 {% block scripts %}
 <script>
-let holdings = [], prices = {}, aC = null, pC = null, tempId = -1;
+let holdings = [], prices = {}, aC = null, pC = null, tlC = null, tempId = -1;
 
-// ── Load holdings then auto-fetch prices ──
 async function init() {
   try { holdings = await FF.get('/api/stocks'); } catch(e) { holdings = []; }
   holdings.forEach(h => { h._del = false; h._new = false; });
-  buildTable();
-  updateKPIs();
-  buildCharts();
-  if (holdings.filter(h => !h._del && h.symbol).length) {
-    await doRefreshPrices();
-  }
+  buildTable(); updateKPIs(); buildCharts();
+  if (holdings.filter(h => !h._del && h.symbol).length) await doRefreshPrices();
 }
 
 async function doRefreshPrices() {
   const btn = document.getElementById('refresh-btn');
   const status = document.getElementById('price-status');
   btn.disabled = true; btn.textContent = 'Fetching...';
-  status.textContent = 'Fetching prices...';
-  status.style.color = 'var(--text3)';
+  status.textContent = 'Fetching prices...'; status.style.color = 'var(--text3)';
   try {
     const resp = await fetch('/api/stock-prices');
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
-    // Handle both {prices:{}, errors:{}} and flat {SYM: price} formats
     prices = data.prices !== undefined ? data.prices : data;
-    const errs = data.errors || {};
     buildTable(); updateKPIs(); buildCharts();
     const found = Object.entries(prices).filter(([k,v]) => v).map(([k,v]) => k + ' $' + Number(v).toFixed(2)).join('  |  ');
-    const errMsg = Object.entries(errs).map(([k,v]) => k + ': ' + v).join(', ');
-    if (found) {
-      status.textContent = found;
-      status.style.color = 'var(--green)';
-    } else {
-      status.textContent = 'No prices found.' + (errMsg ? ' Errors: ' + errMsg : '');
-      status.style.color = 'var(--red)';
-    }
+    status.textContent = found || 'No prices found — check symbols';
+    status.style.color = found ? 'var(--green)' : 'var(--red)';
   } catch(e) {
-    status.textContent = 'Error: ' + e.message;
-    status.style.color = 'var(--red)';
+    status.textContent = 'Error: ' + e.message; status.style.color = 'var(--red)';
   }
   btn.disabled = false; btn.textContent = '↻ Refresh Prices';
 }
@@ -98,7 +90,7 @@ function buildTable() {
   tb.innerHTML = '';
   const active = holdings.filter(h => !h._del);
   if (!active.length) {
-    tb.innerHTML = '<tr><td colspan="10"><div class="empty-state"><p>No holdings. Click + Add, fill in details, then Save All.</p></div></td></tr>';
+    tb.innerHTML = '<tr><td colspan="11"><div class="empty-state"><p>No holdings. Click + Add.</p></div></td></tr>';
     return;
   }
   active.forEach(h => {
@@ -111,9 +103,11 @@ function buildTable() {
     const tr = document.createElement('tr');
     tr.dataset.hid = h.id;
     tr.innerHTML =
-      '<td><input class="editable-cell mono" data-f="symbol" value="' + sym + '" style="width:75px;font-weight:600;text-transform:uppercase"' +
+      '<td><input class="editable-cell mono" data-f="symbol" value="' + sym + '" style="width:70px;font-weight:600;text-transform:uppercase"' +
+        ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.closest(\'tr\').querySelector(\'[data-f=purchase_date]\').focus();}" /></td>' +
+      '<td><input class="editable-cell mono" data-f="purchase_date" type="date" value="' + (h.purchase_date || '') + '" style="width:130px"' +
         ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.closest(\'tr\').querySelector(\'[data-f=quantity]\').focus();}" /></td>' +
-      '<td><input class="editable-cell mono" data-f="quantity" type="number" value="' + (h.quantity || '') + '" placeholder="0" style="width:70px"' +
+      '<td><input class="editable-cell mono" data-f="quantity" type="number" value="' + (h.quantity || '') + '" placeholder="0" style="width:65px"' +
         ' oninput="liveRow(this)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.closest(\'tr\').querySelector(\'[data-f=purchase_price]\').focus();}" /></td>' +
       '<td><input class="editable-cell mono" data-f="purchase_price" type="number" value="' + (h.purchase_price || '') + '" placeholder="0" style="width:85px"' +
         ' oninput="liveRow(this)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();doSave();}" /></td>' +
@@ -122,7 +116,7 @@ function buildTable() {
       '<td class="td-mono" id="vl-' + h.id + '">' + (val !== null ? '$' + FF.dec(val) : '—') + '</td>' +
       '<td class="td-mono ' + (pnl === null ? '' : pnl >= 0 ? 'td-positive' : 'td-negative') + '" id="pnl-' + h.id + '">' + (pnl !== null ? (pnl >= 0 ? '+' : '') + ' $' + FF.dec(pnl) : '—') + '</td>' +
       '<td class="td-mono ' + (pct === null ? '' : pct >= 0 ? 'td-positive' : 'td-negative') + '" id="pct-' + h.id + '">' + (pct !== null ? (pct >= 0 ? '+' : '') + FF.dec(pct) + '%' : '—') + '</td>' +
-      '<td><input class="editable-cell" data-f="notes" value="' + (h.notes || '') + '" placeholder="notes..." /></td>' +
+      '<td><input class="editable-cell" data-f="notes" value="' + (h.notes || '') + '" placeholder="notes..." style="width:90px" /></td>' +
       '<td><button class="btn btn-danger btn-icon" onclick="delRow(' + h.id + ')">&#x2715;</button></td>';
     tb.appendChild(tr);
   });
@@ -132,16 +126,15 @@ function liveRow(input) {
   const tr = input.closest('tr');
   const id = +tr.dataset.hid;
   const qty = +(tr.querySelector('[data-f=quantity]').value) || 0;
-  const pp = +(tr.querySelector('[data-f=purchase_price]').value) || 0;
+  const pp  = +(tr.querySelector('[data-f=purchase_price]').value) || 0;
   const sym = (tr.querySelector('[data-f=symbol]').value || '').toUpperCase();
   const cur = prices[sym] || null;
-  const cost = qty * pp;
-  const val = cur ? qty * cur : null;
+  const cost = qty * pp, val = cur ? qty * cur : null;
   const pnl = val !== null ? val - cost : null;
   const pct = pnl !== null && cost ? (pnl / cost) * 100 : null;
-  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  set('cb-' + id, '$' + FF.dec(cost));
-  set('vl-' + id, val !== null ? '$' + FF.dec(val) : '—');
+  const set = (sid, v) => { const el = document.getElementById(sid); if (el) el.textContent = v; };
+  set('cb-'  + id, '$' + FF.dec(cost));
+  set('vl-'  + id, val !== null ? '$' + FF.dec(val) : '—');
   set('pnl-' + id, pnl !== null ? (pnl >= 0 ? '+' : '') + ' $' + FF.dec(pnl) : '—');
   set('pct-' + id, pct !== null ? (pct >= 0 ? '+' : '') + FF.dec(pct) + '%' : '—');
   syncFromDOM(); updateKPIs();
@@ -150,15 +143,16 @@ function liveRow(input) {
 function syncFromDOM() {
   document.querySelectorAll('#stocks-tbody tr[data-hid]').forEach(tr => {
     const id = +tr.dataset.hid, h = holdings.find(x => x.id === id); if (!h) return;
-    h.symbol = (tr.querySelector('[data-f=symbol]').value || '').toUpperCase();
-    h.quantity = +(tr.querySelector('[data-f=quantity]').value) || 0;
+    h.symbol        = (tr.querySelector('[data-f=symbol]').value || '').toUpperCase();
+    h.purchase_date = tr.querySelector('[data-f=purchase_date]').value || '';
+    h.quantity      = +(tr.querySelector('[data-f=quantity]').value) || 0;
     h.purchase_price = +(tr.querySelector('[data-f=purchase_price]').value) || 0;
-    h.notes = tr.querySelector('[data-f=notes]').value || '';
+    h.notes         = tr.querySelector('[data-f=notes]').value || '';
   });
 }
 
 function addRow() {
-  holdings.push({ id: tempId--, symbol: '', quantity: 0, purchase_price: 0, notes: '', _del: false, _new: true });
+  holdings.push({ id: tempId--, symbol: '', purchase_date: '', quantity: 0, purchase_price: 0, notes: '', _del: false, _new: true });
   buildTable();
   setTimeout(() => { const s = document.querySelectorAll('[data-f=symbol]'); if (s.length) s[s.length-1].focus(); }, 60);
 }
@@ -177,9 +171,9 @@ async function doSave() {
     for (const h of holdings.filter(x => x._del && !x._new))
       await FF.del('/api/stocks/' + h.id);
     for (const h of holdings.filter(x => !x._del && x._new && x.symbol))
-      await FF.post('/api/stocks', { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
+      await FF.post('/api/stocks', { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, purchase_date: h.purchase_date, notes: h.notes || '' });
     for (const h of holdings.filter(x => !x._del && !x._new))
-      await FF.put('/api/stocks/' + h.id, { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, notes: h.notes || '' });
+      await FF.put('/api/stocks/' + h.id, { symbol: h.symbol, quantity: h.quantity, purchase_price: h.purchase_price, purchase_date: h.purchase_date, notes: h.notes || '' });
     FF.toast('Saved!');
     await init();
   } catch(e) { FF.toast('Error: ' + e.message, 'error'); }
@@ -187,6 +181,7 @@ async function doSave() {
 }
 
 function updateKPIs() {
+  syncFromDOM();
   let cost = 0, val = 0;
   holdings.filter(h => !h._del).forEach(h => {
     const sym = (h.symbol || '').toUpperCase();
@@ -198,49 +193,99 @@ function updateKPIs() {
   document.getElementById('kpi-cost').textContent = '$' + FF.dec(cost);
   document.getElementById('kpi-cnt').textContent  = holdings.filter(h => !h._del).length;
   const pe = document.getElementById('kpi-pnl');
-  pe.textContent  = val ? (pnl >= 0 ? '+' : '') + ' $' + FF.dec(pnl) : '—';
-  pe.className = 'kpi-value ' + (pnl >= 0 ? 'green' : 'red');
+  pe.textContent = val ? (pnl >= 0 ? '+' : '') + ' $' + FF.dec(pnl) : '—';
+  pe.className   = 'kpi-value ' + (pnl >= 0 ? 'green' : 'red');
   const pp = document.getElementById('kpi-pct');
-  pp.textContent  = val ? (pct >= 0 ? '+' : '') + FF.dec(pct) + '%' : '—';
-  pp.className = 'kpi-value ' + (pct >= 0 ? 'green' : 'red');
+  pp.textContent = val ? (pct >= 0 ? '+' : '') + FF.dec(pct) + '%' : '—';
+  pp.className   = 'kpi-value ' + (pct >= 0 ? 'green' : 'red');
 }
 
 function buildCharts() {
   const active = holdings.filter(h => !h._del && h.symbol);
 
-  // Merge duplicates by symbol for charts only (table stays as-is)
+  // Merge duplicates by symbol for pie/bar charts
   const merged = {};
   for (const h of active) {
     const sym = (h.symbol || '').toUpperCase();
-    if (!merged[sym]) {
-      merged[sym] = { symbol: sym, quantity: 0, totalCost: 0 };
-    }
+    if (!merged[sym]) merged[sym] = { symbol: sym, quantity: 0, totalCost: 0 };
     merged[sym].quantity  += (+h.quantity || 0);
     merged[sym].totalCost += (+h.quantity || 0) * (+h.purchase_price || 0);
   }
-  const syms   = Object.keys(merged);
-  const vals   = syms.map(s => prices[s] ? merged[s].quantity * prices[s] : merged[s].totalCost);
-  const pnlD   = syms.map(s => prices[s] ? merged[s].quantity * prices[s] - merged[s].totalCost : 0);
-  const cols   = [FF.colors.gold, FF.colors.blue, FF.colors.green, FF.colors.purple, FF.colors.teal, FF.colors.red];
+  const syms = Object.keys(merged);
+  const vals  = syms.map(s => prices[s] ? merged[s].quantity * prices[s] : merged[s].totalCost);
+  const pnlD  = syms.map(s => prices[s] ? merged[s].quantity * prices[s] - merged[s].totalCost : 0);
+  const cols  = [FF.colors.gold, FF.colors.blue, FF.colors.green, FF.colors.purple, FF.colors.teal, FF.colors.red];
 
+  // Allocation pie
   const c1 = document.getElementById('c-alloc').getContext('2d');
   if (aC) aC.destroy();
-  if (syms.length) aC = new Chart(c1, {
-    type: 'doughnut',
+  if (syms.length) aC = new Chart(c1, { type: 'doughnut',
     data: { labels: syms, datasets: [{ data: vals, backgroundColor: cols.slice(0, syms.length), borderWidth: 2, borderColor: '#1f2434' }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
   });
 
+  // P&L bar
   const c2 = document.getElementById('c-pnl').getContext('2d');
   if (pC) pC.destroy();
-  if (syms.length) pC = new Chart(c2, {
-    type: 'bar',
+  if (syms.length) pC = new Chart(c2, { type: 'bar',
     data: { labels: syms, datasets: [{ data: pnlD,
-      backgroundColor: pnlD.map(v => v >= 0 ? 'rgba(76,175,136,0.75)' : 'rgba(224,92,106,0.75)'),
-      borderRadius: 4 }] },
+      backgroundColor: pnlD.map(v => v >= 0 ? 'rgba(76,175,136,0.75)' : 'rgba(224,92,106,0.75)'), borderRadius: 4 }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
       scales: { y: { ticks: { callback: v => '$' + v.toFixed(0) } } } }
   });
+
+  // Portfolio timeline — sorted by purchase date, cumulative cost basis
+  const withDates = active.filter(h => h.purchase_date).sort((a, b) => a.purchase_date.localeCompare(b.purchase_date));
+  const c3 = document.getElementById('c-timeline').getContext('2d');
+  if (tlC) tlC.destroy();
+
+  if (withDates.length) {
+    // Build timeline points: each purchase adds to cumulative cost
+    // Also show current value at each date using live price
+    const events = [];
+    let cumCost = 0;
+    withDates.forEach(h => {
+      cumCost += (+h.quantity || 0) * (+h.purchase_price || 0);
+      events.push({ date: h.purchase_date, cost: cumCost, sym: (h.symbol||'').toUpperCase(), qty: +h.quantity||0 });
+    });
+
+    // Add today's point with current value
+    const today = new Date().toISOString().split('T')[0];
+    let totalVal = 0;
+    Object.keys(merged).forEach(sym => {
+      totalVal += prices[sym] ? merged[sym].quantity * prices[sym] : merged[sym].totalCost;
+    });
+
+    const labels = [...events.map(e => e.date), today];
+    const costData = [...events.map(e => e.cost), cumCost];
+    const valueData = [...events.map(e => {
+      // At this point in time, what was the value? Use current prices as approximation
+      let v = 0;
+      withDates.filter(h => h.purchase_date <= e.date).forEach(h => {
+        const s = (h.symbol||'').toUpperCase();
+        v += prices[s] ? (+h.quantity||0)*prices[s] : (+h.quantity||0)*(+h.purchase_price||0);
+      });
+      return v;
+    }), totalVal];
+
+    tlC = new Chart(c3, { type: 'line',
+      data: { labels,
+        datasets: [
+          { label: 'Cost Basis', data: costData,
+            borderColor: FF.colors.teal, backgroundColor: 'transparent',
+            tension: 0.3, pointRadius: 5, borderWidth: 2, borderDash: [5,4] },
+          { label: 'Portfolio Value', data: valueData,
+            borderColor: FF.colors.gold, backgroundColor: FF.gradient(c3, FF.colors.gold),
+            tension: 0.3, fill: true, pointRadius: 5, borderWidth: 2 }
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' } },
+        scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(1) + 'k' } } },
+        interaction: { mode: 'index', intersect: false }
+      }
+    });
+  }
 }
 
 init();
