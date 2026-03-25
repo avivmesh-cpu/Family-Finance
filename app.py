@@ -460,9 +460,9 @@ def stock_price_single(symbol):
 @auth_required
 def update_stock(sid):
     d = request.json; conn = get_db()
-    run(conn, 'UPDATE stock_holding SET symbol=?,purchase_price=?,quantity=?,notes=? WHERE id=?',
+    run(conn, 'UPDATE stock_holding SET symbol=?,purchase_price=?,quantity=?,purchase_date=?,notes=? WHERE id=?',
         (d.get('symbol','').upper(), float(d.get('purchase_price',0)),
-         float(d.get('quantity',0)), d.get('notes',''), sid))
+         float(d.get('quantity',0)), d.get('purchase_date',''), d.get('notes',''), sid))
     close_db(conn); return jsonify({'status':'ok'})
 
 @app.route('/api/stocks/<int:sid>', methods=['DELETE'])
