@@ -200,7 +200,118 @@ function updateKPIs() {
   pp.className   = 'kpi-value ' + (pct >= 0 ? 'green' : 'red');
 }
 
-function buildCharts() {
+async function buildTimelineChart() {
+  const withDates = holdings.filter(h => !h._del && h.symbol && h.purchase_date);
+  if (!withDates.length) return;
+
+  const c3 = document.getElementById('c-timeline').getContext('2d');
+  if (tlC) tlC.destroy();
+  tlC = null;
+
+  // Show loading
+  document.querySelector('.card.mb-24 .card-subtitle').textContent = 'Loading daily prices…';
+
+  let histData;
+  try {
+    histData = await FF.get('/api/stocks/history');
+  } catch(e) {
+    document.querySelector('.card.mb-24 .card-subtitle').textContent = 'Could not load history: ' + e.message;
+    return;
+  }
+
+  const series   = histData.series || {};
+  const holdingsDB = histData.holdings || [];
+
+  // Build sorted list of all dates across all symbols
+  const allDates = new Set();
+  Object.values(series).forEach(dayMap => Object.keys(dayMap).forEach(d => allDates.add(d)));
+
+  // Also add purchase dates as boundary points
+  withDates.forEach(h => allDates.add(h.purchase_date));
+  allDates.add(new Date().toISOString().split('T')[0]);
+
+  const sortedDates = [...allDates].sort();
+
+  // For each date, compute portfolio value = sum of (qty × price on that date) for holdings purchased by that date
+  const costData  = [];
+  const valueData = [];
+
+  sortedDates.forEach(date => {
+    // Cost basis: sum of cost for all holdings purchased on or before this date
+    let cost = 0;
+    withDates.filter(h => h.purchase_date <= date).forEach(h => {
+      cost += (+h.quantity || 0) * (+h.purchase_price || 0);
+    });
+    costData.push(cost);
+
+    // Portfolio value: use historical price for that date, fallback to nearest price or live price
+    let val = 0;
+    withDates.filter(h => h.purchase_date <= date).forEach(h => {
+      const sym = (h.symbol || '').toUpperCase();
+      const dayPrices = series[sym] || {};
+      // Find the price: exact date, or scan backwards up to 5 days for last trading day
+      let price = null;
+      for (let i = 0; i <= 5; i++) {
+        const d = new Date(date);
+        d.setDate(d.getDate() - i);
+        const key = d.toISOString().split('T')[0];
+        if (dayPrices[key]) { price = dayPrices[key]; break; }
+      }
+      if (!price) price = prices[sym] || (+h.purchase_price || 0);
+      val += (+h.quantity || 0) * price;
+    });
+    valueData.push(val);
+  });
+
+  document.querySelector('.card.mb-24 .card-subtitle').textContent = 'Cumulative cost basis vs daily market value';
+
+  // Decide how many x-axis ticks to show (max ~10)
+  const tickStep = Math.max(1, Math.floor(sortedDates.length / 10));
+
+  tlC = new Chart(c3, { type: 'line',
+    data: { labels: sortedDates,
+      datasets: [
+        { label: 'Cost Basis', data: costData,
+          borderColor: FF.colors.teal, backgroundColor: 'transparent',
+          tension: 0, stepped: true,
+          pointRadius: 0, pointHoverRadius: 5,
+          borderWidth: 2, borderDash: [5,4] },
+        { label: 'Portfolio Value', data: valueData,
+          borderColor: FF.colors.gold, backgroundColor: FF.gradient(c3, FF.colors.gold),
+          tension: 0.3, fill: true,
+          pointRadius: 0, pointHoverRadius: 5,
+          borderWidth: 2 }
+      ]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: {
+          mode: 'index', intersect: false,
+          callbacks: {
+            title: items => items[0]?.label || '',
+            label: ctx => ctx.dataset.label + ': $' + FF.dec(ctx.parsed.y)
+          }
+        }
+      },
+      hover: { mode: 'index', intersect: false },
+      scales: {
+        x: {
+          ticks: {
+            maxTicksLimit: 10,
+            maxRotation: 45,
+            callback: function(val, idx) {
+              // Only show every Nth label
+              return idx % tickStep === 0 ? this.getLabelForValue(val) : '';
+            }
+          }
+        },
+        y: { ticks: { callback: v => '$' + (v/1000).toFixed(1) + 'k' } }
+      },
+      interaction: { mode: 'index', intersect: false }
+    }
+  });
+}
   const active = holdings.filter(h => !h._del && h.symbol);
 
   // Merge duplicates by symbol for pie/bar charts
@@ -233,86 +344,15 @@ function buildCharts() {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
       scales: { y: { ticks: { callback: v => '$' + v.toFixed(0) } } } }
   });
+}
 
-  // Portfolio timeline — sorted by purchase date, cumulative cost basis
-  const withDates = active.filter(h => h.purchase_date).sort((a, b) => a.purchase_date.localeCompare(b.purchase_date));
-  const c3 = document.getElementById('c-timeline').getContext('2d');
-  if (tlC) tlC.destroy();
-
-  if (withDates.length) {
-    // Build timeline: for each purchase date, compute cumulative cost AND current value
-    let cumCost = 0;
-    const points = [];
-
-    // Sort all purchases by date
-    withDates.forEach(h => {
-      const prevCost = cumCost;
-      cumCost += (+h.quantity || 0) * (+h.purchase_price || 0);
-      // Add a point just BEFORE this purchase (old cost) and just AFTER (new cost)
-      // This creates the step effect
-      if (points.length) {
-        points.push({ date: h.purchase_date, cost: prevCost, isStep: true });
-      }
-      points.push({ date: h.purchase_date, cost: cumCost, isStep: false });
-    });
-
-    // Add today as the final point
-    const today = new Date().toISOString().split('T')[0];
-    if (points.length && points[points.length-1].date !== today) {
-      points.push({ date: today, cost: cumCost, isStep: false });
-    }
-
-    const labels = points.map(p => p.date);
-
-    // Cost basis data (stepped)
-    const costData = points.map(p => p.cost);
-
-    // Portfolio value at each point: shares held at that date × current price
-    const valueData = points.map(p => {
-      let v = 0;
-      withDates.filter(h => h.purchase_date <= p.date).forEach(h => {
-        const s = (h.symbol||'').toUpperCase();
-        v += prices[s] ? (+h.quantity||0)*prices[s] : (+h.quantity||0)*(+h.purchase_price||0);
-      });
-      return v;
-    });
-
-    tlC = new Chart(c3, { type: 'line',
-      data: { labels,
-        datasets: [
-          { label: 'Cost Basis', data: costData,
-            borderColor: FF.colors.teal, backgroundColor: 'transparent',
-            tension: 0, stepped: true,
-            pointRadius: points.map(p => p.isStep ? 0 : 5),
-            pointHoverRadius: 6,
-            borderWidth: 2, borderDash: [5,4] },
-          { label: 'Portfolio Value', data: valueData,
-            borderColor: FF.colors.gold, backgroundColor: FF.gradient(c3, FF.colors.gold),
-            tension: 0, stepped: true, fill: true,
-            pointRadius: points.map(p => p.isStep ? 0 : 5),
-            pointHoverRadius: 6,
-            borderWidth: 2 }
-        ]
-      },
-      options: { responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { position: 'top' },
-          tooltip: {
-            mode: 'index',
-            intersect: false,
-            callbacks: {
-              label: ctx => ctx.dataset.label + ': $' + FF.dec(ctx.parsed.y)
-            }
-          }
-        },
-        hover: { mode: 'index', intersect: false },
-        scales: {
-          x: { ticks: { maxTicksLimit: 12, maxRotation: 45 } },
-          y: { ticks: { callback: v => '$' + (v/1000).toFixed(1) + 'k' } }
-        },
-        interaction: { mode: 'index', intersect: false }
-      }
-    });
+async function init() {
+  try { holdings = await FF.get('/api/stocks'); } catch(e) { holdings = []; }
+  holdings.forEach(h => { h._del = false; h._new = false; });
+  buildTable(); updateKPIs(); buildCharts();
+  if (holdings.filter(h => !h._del && h.symbol).length) {
+    await doRefreshPrices();
+    await buildTimelineChart();
   }
 }
 
