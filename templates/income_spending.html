@@ -311,7 +311,12 @@ function buildCatChart(){
 
 async function buildTrendChart(){
   const summary=await FF.get('/api/transactions/summary');
-  const keys=Object.keys(summary).sort().slice(-12);
+  const allKeys=Object.keys(summary).sort();
+  // Find first month where income > 0
+  const firstKey = allKeys.find(k=>(summary[k].salary||0)+(summary[k].other_income||0)>0);
+  const keys = firstKey
+    ? allKeys.filter(k=>k>=firstKey).slice(-12)
+    : allKeys.slice(-12);
   const ctx=document.getElementById('trend-chart').getContext('2d');
   if(tChart)tChart.destroy();
   tChart=new Chart(ctx,{type:'line',

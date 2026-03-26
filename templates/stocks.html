@@ -58,13 +58,6 @@
 <script>
 let holdings = [], prices = {}, aC = null, pC = null, tlC = null, tempId = -1;
 
-async function init() {
-  try { holdings = await FF.get('/api/stocks'); } catch(e) { holdings = []; }
-  holdings.forEach(h => { h._del = false; h._new = false; });
-  buildTable(); updateKPIs(); buildCharts();
-  if (holdings.filter(h => !h._del && h.symbol).length) await doRefreshPrices();
-}
-
 async function doRefreshPrices() {
   const btn = document.getElementById('refresh-btn');
   const status = document.getElementById('price-status');
