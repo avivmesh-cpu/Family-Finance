@@ -240,48 +240,76 @@ function buildCharts() {
   if (tlC) tlC.destroy();
 
   if (withDates.length) {
-    // Build timeline points: each purchase adds to cumulative cost
-    // Also show current value at each date using live price
-    const events = [];
+    // Build timeline: for each purchase date, compute cumulative cost AND current value
     let cumCost = 0;
+    const points = [];
+
+    // Sort all purchases by date
     withDates.forEach(h => {
+      const prevCost = cumCost;
       cumCost += (+h.quantity || 0) * (+h.purchase_price || 0);
-      events.push({ date: h.purchase_date, cost: cumCost, sym: (h.symbol||'').toUpperCase(), qty: +h.quantity||0 });
+      // Add a point just BEFORE this purchase (old cost) and just AFTER (new cost)
+      // This creates the step effect
+      if (points.length) {
+        points.push({ date: h.purchase_date, cost: prevCost, isStep: true });
+      }
+      points.push({ date: h.purchase_date, cost: cumCost, isStep: false });
     });
 
-    // Add today's point with current value
+    // Add today as the final point
     const today = new Date().toISOString().split('T')[0];
-    let totalVal = 0;
-    Object.keys(merged).forEach(sym => {
-      totalVal += prices[sym] ? merged[sym].quantity * prices[sym] : merged[sym].totalCost;
-    });
+    if (points.length && points[points.length-1].date !== today) {
+      points.push({ date: today, cost: cumCost, isStep: false });
+    }
 
-    const labels = [...events.map(e => e.date), today];
-    const costData = [...events.map(e => e.cost), cumCost];
-    const valueData = [...events.map(e => {
-      // At this point in time, what was the value? Use current prices as approximation
+    const labels = points.map(p => p.date);
+
+    // Cost basis data (stepped)
+    const costData = points.map(p => p.cost);
+
+    // Portfolio value at each point: shares held at that date × current price
+    const valueData = points.map(p => {
       let v = 0;
-      withDates.filter(h => h.purchase_date <= e.date).forEach(h => {
+      withDates.filter(h => h.purchase_date <= p.date).forEach(h => {
         const s = (h.symbol||'').toUpperCase();
         v += prices[s] ? (+h.quantity||0)*prices[s] : (+h.quantity||0)*(+h.purchase_price||0);
       });
       return v;
-    }), totalVal];
+    });
 
     tlC = new Chart(c3, { type: 'line',
       data: { labels,
         datasets: [
           { label: 'Cost Basis', data: costData,
             borderColor: FF.colors.teal, backgroundColor: 'transparent',
-            tension: 0.3, pointRadius: 5, borderWidth: 2, borderDash: [5,4] },
+            tension: 0, stepped: true,
+            pointRadius: points.map(p => p.isStep ? 0 : 5),
+            pointHoverRadius: 6,
+            borderWidth: 2, borderDash: [5,4] },
           { label: 'Portfolio Value', data: valueData,
             borderColor: FF.colors.gold, backgroundColor: FF.gradient(c3, FF.colors.gold),
-            tension: 0.3, fill: true, pointRadius: 5, borderWidth: 2 }
+            tension: 0, stepped: true, fill: true,
+            pointRadius: points.map(p => p.isStep ? 0 : 5),
+            pointHoverRadius: 6,
+            borderWidth: 2 }
         ]
       },
       options: { responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'top' } },
-        scales: { y: { ticks: { callback: v => '$' + (v/1000).toFixed(1) + 'k' } } },
+        plugins: {
+          legend: { position: 'top' },
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+            callbacks: {
+              label: ctx => ctx.dataset.label + ': $' + FF.dec(ctx.parsed.y)
+            }
+          }
+        },
+        hover: { mode: 'index', intersect: false },
+        scales: {
+          x: { ticks: { maxTicksLimit: 12, maxRotation: 45 } },
+          y: { ticks: { callback: v => '$' + (v/1000).toFixed(1) + 'k' } }
+        },
         interaction: { mode: 'index', intersect: false }
       }
     });
