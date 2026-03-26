@@ -195,20 +195,24 @@ function updateKPIs() {
 
 async function buildTimelineChart() {
   const withDates = holdings.filter(h => !h._del && h.symbol && h.purchase_date);
-  if (!withDates.length) return;
+  if (!withDates.length) {
+    const sub = document.querySelector('.card.mb-24 .card-subtitle');
+    if (sub) sub.textContent = 'Add purchase dates to your holdings to see the timeline';
+    return;
+  }
 
   const c3 = document.getElementById('c-timeline').getContext('2d');
   if (tlC) tlC.destroy();
   tlC = null;
 
-  // Show loading
-  document.querySelector('.card.mb-24 .card-subtitle').textContent = 'Loading daily prices…';
+  const sub = document.querySelector('.card.mb-24 .card-subtitle');
+  if (sub) sub.textContent = 'Loading daily prices…';
 
   let histData;
   try {
     histData = await FF.get('/api/stocks/history');
   } catch(e) {
-    document.querySelector('.card.mb-24 .card-subtitle').textContent = 'Could not load history: ' + e.message;
+    if (sub) sub.textContent = 'Could not load history: ' + e.message;
     return;
   }
 
@@ -344,8 +348,13 @@ async function init() {
   holdings.forEach(h => { h._del = false; h._new = false; });
   buildTable(); updateKPIs(); buildCharts();
   if (holdings.filter(h => !h._del && h.symbol).length) {
-    await doRefreshPrices();
-    await buildTimelineChart();
+    // Load prices and timeline independently so one failure doesn't block the other
+    doRefreshPrices().catch(e => console.error('Price fetch error:', e));
+    buildTimelineChart().catch(e => {
+      console.error('Timeline error:', e);
+      const sub = document.querySelector('.card.mb-24 .card-subtitle');
+      if (sub) sub.textContent = 'Timeline unavailable — add purchase dates to holdings';
+    });
   }
 }
 
