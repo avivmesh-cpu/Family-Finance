@@ -471,6 +471,55 @@ def delete_stock(sid):
     conn = get_db(); run(conn, 'DELETE FROM stock_holding WHERE id=?', (sid,)); close_db(conn)
     return jsonify({'status':'ok'})
 
+@app.route('/api/stocks/history', methods=['GET'])
+@auth_required
+def get_stock_history():
+    """Return daily closing prices for all held symbols from earliest purchase date to today."""
+    from datetime import date as dt, timedelta
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://finance.yahoo.com',
+    }
+    conn = get_db()
+    holdings = q(conn, 'SELECT symbol, quantity, purchase_price, purchase_date FROM stock_holding')
+    close_db(conn)
+
+    # Find earliest purchase date
+    dates_with_data = [h['purchase_date'] for h in holdings if h['purchase_date']]
+    if not dates_with_data:
+        return jsonify({'dates': [], 'series': {}})
+
+    start_date = min(dates_with_data)
+    epoch = dt(1970, 1, 1)
+    start_dt = dt.fromisoformat(start_date)
+    p1 = int((start_dt - epoch).days) * 86400
+    p2 = int((dt.today() - epoch).days) * 86400 + 86400
+
+    # Fetch daily history for each unique symbol
+    symbols = list(set(h['symbol'] for h in holdings if h['symbol']))
+    series = {}
+    for sym in symbols:
+        for host in ['query1', 'query2']:
+            try:
+                url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&period1={p1}&period2={p2}'
+                resp = req_lib.get(url, timeout=15, headers=headers)
+                data = resp.json()['chart']['result'][0]
+                timestamps = data.get('timestamp', [])
+                closes = data['indicators']['quote'][0].get('close', [])
+                day_prices = {}
+                for ts, close in zip(timestamps, closes):
+                    if close is not None:
+                        day = dt.fromtimestamp(ts).strftime('%Y-%m-%d')
+                        day_prices[day] = round(close, 4)
+                if day_prices:
+                    series[sym] = day_prices
+                    break
+            except Exception:
+                continue
+
+    return jsonify({'series': series, 'holdings': holdings})
+
 # ── Daughter/Romi ─────────────────────────────────────────────────
 @app.route('/api/daughter', methods=['GET'])
 @auth_required
