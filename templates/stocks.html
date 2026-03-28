@@ -309,6 +309,8 @@ async function buildTimelineChart() {
     }
   });
 }
+
+function buildCharts() {
   const active = holdings.filter(h => !h._del && h.symbol);
 
   // Merge duplicates by symbol for pie/bar charts
