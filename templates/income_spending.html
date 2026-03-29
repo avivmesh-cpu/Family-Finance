@@ -324,7 +324,9 @@ async function buildTrendChart(){
       datasets:[
         {label:'Income',data:keys.map(k=>(summary[k].salary||0)+(summary[k].other_income||0)),borderColor:FF.colors.green,tension:0.4,fill:false,pointRadius:3},
         {label:'Expenses',data:keys.map(k=>summary[k].expenses||0),borderColor:FF.colors.red,tension:0.4,fill:false,pointRadius:3}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top'}},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'top'}, tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>ctx.dataset.label+': '+FF.ils(ctx.parsed.y)}}},
+      interaction:{mode:'index',intersect:false},
       scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(0)+'k'}}}}});
 }
 

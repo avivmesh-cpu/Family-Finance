@@ -138,7 +138,8 @@ function renderChart() {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => '₪' + FF.dec(ctx.parsed.y) } } },
+      interaction: { mode: 'index', intersect: false },
       scales: { y: { ticks: { callback: v => '₪' + (v/1000).toFixed(0) + 'k' }, reverse: false } }
     }
   });

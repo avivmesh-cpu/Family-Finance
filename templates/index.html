@@ -127,7 +127,9 @@
         {label:'Expenses', data:summaryKeys.map(k=>summary[k].expenses||0), backgroundColor:'rgba(224,92,106,0.75)', borderRadius:4}
       ]
     },
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top'}},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'top'},tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>ctx.dataset.label+': '+FF.ils(ctx.parsed.y)}}},
+      interaction:{mode:'index',intersect:false},
       scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(0)+'k'}}}}
   });
 
@@ -166,7 +168,9 @@
       datasets:[{label:'Net Worth', data:nwData, borderColor:FF.colors.gold,
         backgroundColor:FF.gradient(ctx3,FF.colors.gold), tension:0.4, fill:true, pointRadius:3}]
     },
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>'Net Worth: '+FF.ils(ctx.parsed.y)}}},
+      interaction:{mode:'index',intersect:false},
       scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(0)+'k'}}}}
   });
 
@@ -181,7 +185,9 @@
         borderColor:FF.colors.red, backgroundColor:FF.gradient(ctx4,FF.colors.red,0.2,0),
         tension:0.3, fill:true, pointRadius:3}]
     },
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>'Balance: '+FF.ils(ctx.parsed.y)}}},
+      interaction:{mode:'index',intersect:false},
       scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(0)+'k'}}}}
   });
 })();

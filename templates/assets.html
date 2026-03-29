@@ -261,7 +261,8 @@ async function buildHistChart() {
         borderColor: FF.colors.green, backgroundColor: FF.gradient(ctx, FF.colors.green),
         tension: 0.4, fill: true, pointRadius: 3 }]
     },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => '₪' + FF.dec(ctx.parsed.y) } } },
+      interaction: { mode: 'index', intersect: false },
       scales: { y: { ticks: { callback: v => '\u20AA' + (v / 1000).toFixed(0) + 'k' } } } }
   });
 }
