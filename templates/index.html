@@ -116,7 +116,11 @@
   }
 
   // ── Chart 1: Income vs Expenses bar ──
-  const summaryKeys = Object.keys(summary).sort().slice(-12);
+  const allSummaryKeys = Object.keys(summary).sort();
+  const firstNonZero = allSummaryKeys.find(k => (summary[k].salary||0)+(summary[k].other_income||0) > 0);
+  const summaryKeys = firstNonZero
+    ? allSummaryKeys.filter(k => k >= firstNonZero).slice(-12)
+    : allSummaryKeys.slice(-12);
   const ctx1 = document.getElementById('overview-chart').getContext('2d');
   new Chart(ctx1, {
     type: 'bar',
