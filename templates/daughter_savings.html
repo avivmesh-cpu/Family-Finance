@@ -271,8 +271,10 @@ function renderCharts() {
     type: 'line',
     data: { labels, datasets: [{ data: sorted.map(r => r.cumulative_shares),
       borderColor: FF.colors.gold, backgroundColor: FF.gradient(ctx1, FF.colors.gold),
-      tension: 0.4, fill: true, pointRadius: 3 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      tension: 0.4, fill: true, pointRadius: 3, pointHoverRadius: 5 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => ctx.parsed.y.toFixed(6) + ' shares' } } },
+      interaction: { mode: 'index', intersect: false },
       scales: { y: { ticks: { callback: v => v.toFixed(3) + ' sh' } } } }
   });
 
@@ -301,8 +303,10 @@ function renderCharts() {
     type: 'line',
     data: { labels, datasets: [{ data: data2,
       borderColor: FF.colors.green, backgroundColor: FF.gradient(ctx2, FF.colors.green),
-      tension: 0.4, fill: true, pointRadius: 3 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      tension: 0.4, fill: true, pointRadius: 3, pointHoverRadius: 5 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => FF.ils(ctx.parsed.y) } } },
+      interaction: { mode: 'index', intersect: false },
       scales: { y: { ticks: { callback: v => '₪' + (v/1000).toFixed(1) + 'k' } } } }
   });
 }
