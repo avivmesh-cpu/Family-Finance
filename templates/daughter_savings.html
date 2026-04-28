@@ -159,8 +159,20 @@ function updateKPIs() {
   const curValUSD      = liveIVV && actualShares ? actualShares * liveIVV : null;
   const curValILS      = curValUSD ? curValUSD * rate : null;
 
-  // Total Invested = sum of (shares × price × rate) for each actual purchase
-  const totalInvestedILS = purchases.reduce((s,p) => s + p.shares * p.price_usd * rate, 0);
+  // Total Invested = shares × price_usd × USD/ILS rate AT the purchase date
+  // Use the closest virtual accumulation entry on or before the purchase date for the rate
+  const totalInvestedILS = purchases.reduce((s, p) => {
+    const pDate = p.purchase_date;
+    const closestEntry = [...entries]
+      .filter(e => `${e.year}-${String(e.month).padStart(2,'0')}-15` <= pDate)
+      .sort((a, b) => {
+        const da = `${a.year}-${String(a.month).padStart(2,'0')}-15`;
+        const db = `${b.year}-${String(b.month).padStart(2,'0')}-15`;
+        return da > db ? -1 : 1;
+      })[0];
+    const rateAtPurchase = closestEntry ? closestEntry.usd_ils_rate : (liveILSrate || 3.7);
+    return s + p.shares * p.price_usd * rateAtPurchase;
+  }, 0);
 
   // Gain = Current Value (ILS) - Total Invested (ILS)
   const gainILS = curValILS !== null ? curValILS - totalInvestedILS : null;
