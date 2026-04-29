@@ -9,6 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
 :root{--bg:#0d0f14;--bg2:#13161d;--bg3:#1a1e28;--surface:#1f2434;--surface2:#262c3d;--border:#2e3550;--border2:#3d4566;--text:#e8eaf2;--text2:#9aa0bb;--text3:#5c6480;--accent:#c9a84c;--accent2:#e8c96a;--accent-dim:rgba(201,168,76,0.12);--green:#4caf88;--green-dim:rgba(76,175,136,0.12);--red:#e05c6a;--red-dim:rgba(224,92,106,0.12);--blue:#5b8df6;--blue-dim:rgba(91,141,246,0.12);--purple:#9b7cf8;--sidebar-w:240px;--radius:12px;--radius-sm:6px;font-size:15px}
+[data-theme="light"]{--bg:#f4f5f8;--bg2:#ffffff;--bg3:#eef0f5;--surface:#ffffff;--surface2:#f0f2f7;--border:#dde1ec;--border2:#c8cdd e;--text:#1a1e2e;--text2:#4a5070;--text3:#8890aa;--accent:#b8922a;--accent-dim:rgba(184,146,42,0.1);--green:#2e7d5a;--red:#c0392b;--blue:#2563cc;--sidebar-w:240px}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;line-height:1.5}
 .sidebar{width:var(--sidebar-w);min-height:100vh;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;z-index:100}
@@ -227,6 +228,7 @@ select.editable-cell option{background:var(--surface)}
         <button class="btn btn-ghost btn-sm" style="flex:1" onclick="document.getElementById('import-input').click()">&#8593; Import</button>
       </div>
       <input type="file" id="import-input" accept=".json" style="display:none" onchange="importBackup(this)" />
+      <button id="theme-toggle" onclick="toggleTheme()" class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;margin-top:6px;display:flex">☀ Light Mode</button>
       <a href="/logout" class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;margin-top:6px;display:flex">Sign out</a>
     </div>
   </aside>
@@ -322,8 +324,17 @@ select.editable-cell option{background:var(--surface)}
     document.getElementById('mobile-header').style.display = isMobile ? 'flex' : 'none';
     document.getElementById('sidebar-close').style.display = isMobile ? 'block' : 'none';
   }
-  checkMobile();
-  window.addEventListener('resize', checkMobile);
+  function toggleTheme() {
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    document.documentElement.setAttribute('data-theme', isLight ? '' : 'light');
+    document.getElementById('theme-toggle').textContent = isLight ? '☀ Light Mode' : '🌙 Dark Mode';
+    localStorage.setItem('theme', isLight ? 'dark' : 'light');
+  }
+  // Apply saved theme on load
+  if (localStorage.getItem('theme') === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.getElementById('theme-toggle').textContent = '🌙 Dark Mode';
+  }
   </script>
   {% block scripts %}{% endblock %}
 </body>

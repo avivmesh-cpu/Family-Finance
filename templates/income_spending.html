@@ -22,8 +22,20 @@
   </div>
 
   <div class="grid-2 mb-24">
-    <div class="card"><div class="card-title mb-16">Spending by Category</div><div class="chart-wrap" style="height:340px"><canvas id="cat-chart"></canvas></div></div>
-    <div class="card"><div class="card-title mb-16">12-Month Trend</div><div class="chart-wrap"><canvas id="trend-chart"></canvas></div></div>
+    <div class="card">
+      <div class="flex-between mb-4">
+        <div><div class="card-title mb-0">Spending by Category</div></div>
+        <button class="btn btn-ghost btn-sm" onclick="exportChart('cat-chart','spending-category')">⬇ PNG</button>
+      </div>
+      <div class="chart-wrap" style="height:340px"><canvas id="cat-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="flex-between mb-4">
+        <div><div class="card-title mb-0">12-Month Trend</div></div>
+        <button class="btn btn-ghost btn-sm" onclick="exportChart('trend-chart','income-trend')">⬇ PNG</button>
+      </div>
+      <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
+    </div>
   </div>
 
   <div class="card mb-24">
@@ -71,6 +83,7 @@
 {% block scripts %}
 <script>
 let CY,CM,rows=[],tChart=null,cChart=null;
+function exportChart(id,name){const a=document.createElement('a');a.download=name+'-'+new Date().toISOString().split('T')[0]+'.png';a.href=document.getElementById(id).toDataURL('image/png');a.click();}
 const CATS={Housing:'#5b8df6',Food:'#4caf88',Transport:'#c9a84c',Health:'#e05c6a',Education:'#9b7cf8',Utilities:'#4cc9c9',Insurance:'#f08c4b',Children:'#e87dbd',Entertainment:'#7dc8e8',Clothing:'#a8d86e',Other:'#9aa0bb'};
 function getYM(){const[y,m]=document.getElementById('month-picker').value.split('-');return{year:+y,month:+m};}
 function getCat(d){const m=d.match(/^\[([^\]]+)\]/);return m?m[1]:'Other';}

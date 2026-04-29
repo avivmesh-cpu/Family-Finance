@@ -15,8 +15,29 @@
     <div class="kpi-card"><div class="kpi-label">Months Accumulated</div><div class="kpi-value" id="kpi-months">0</div></div>
   </div>
 
-  <!-- Charts -->
+  <!-- Forecast & Countdown -->
   <div class="grid-2 mb-24">
+    <div class="card">
+      <div class="card-title mb-4">Future Value Forecast</div>
+      <div class="card-subtitle mb-12">Based on current pace + assumed annual return</div>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+        <div><label class="form-label" style="font-size:11px">Annual Return %</label>
+          <input type="number" id="forecast-return" value="8" min="0" max="50" step="0.5"
+            style="width:80px;padding:5px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-size:13px"
+            onchange="updateForecast()" /></div>
+        <div><label class="form-label" style="font-size:11px">ILS / month</label>
+          <input type="number" id="forecast-ils" value="300" min="0"
+            style="width:90px;padding:5px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-size:13px"
+            onchange="updateForecast()" /></div>
+      </div>
+      <div class="chart-wrap" style="height:200px"><canvas id="forecast-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title mb-4">Next Whole Share Countdown</div>
+      <div class="card-subtitle mb-16">Based on ₪300/month accumulation</div>
+      <div id="countdown-display" style="text-align:center;padding:20px 0"></div>
+    </div>
+  </div>
     <div class="card"><div class="card-title mb-16">Cumulative Virtual Shares</div><div class="chart-wrap"><canvas id="c1"></canvas></div></div>
     <div class="card"><div class="card-title mb-16">Actual Portfolio Value (ILS)</div><div class="chart-wrap"><canvas id="c2"></canvas></div></div>
   </div>
@@ -102,7 +123,7 @@
 
 {% block scripts %}
 <script>
-let entries = [], purchases = [], chart1 = null, chart2 = null;
+let entries = [], purchases = [], chart1 = null, chart2 = null, forecastChart = null;
 let liveIVV = null, liveILSrate = null;
 
 document.getElementById('start-month').value = '2024-01';
@@ -136,6 +157,71 @@ async function doAutoAccumulate() {
 }
 
 // ── LOAD ALL ──
+function updateForecast() {
+  if (!entries.length) return;
+  const sorted = [...entries].sort((a,b) => a.year-b.year || a.month-b.month);
+  const last = sorted[sorted.length-1];
+  const rate = liveILSrate || last.usd_ils_rate || 3.7;
+  const ivvPrice = liveIVV || last.ivv_price_usd;
+  const annualReturn = (parseFloat(document.getElementById('forecast-return').value) || 8) / 100;
+  const monthlyReturn = Math.pow(1 + annualReturn, 1/12) - 1;
+  const ilsPerMonth = parseFloat(document.getElementById('forecast-ils').value) || 300;
+  const currentShares = last.cumulative_shares;
+  const sharesPerMonth = ivvPrice && rate ? (ilsPerMonth / rate) / ivvPrice : 0;
+  const labels = [], vals = [];
+  for (let y = 0; y <= 18; y++) {
+    labels.push(y === 0 ? 'Now' : y + 'y');
+    const months = y * 12;
+    const fvCurrent = currentShares * Math.pow(1 + annualReturn, y);
+    const fvContribs = months > 0 ? sharesPerMonth * (Math.pow(1+monthlyReturn, months)-1)/monthlyReturn : 0;
+    vals.push((fvCurrent + fvContribs) * ivvPrice * rate);
+  }
+  const ctx = document.getElementById('forecast-chart').getContext('2d');
+  if (forecastChart) forecastChart.destroy();
+  forecastChart = new Chart(ctx, { type: 'line',
+    data: { labels, datasets: [{ label: 'Projected (ILS)', data: vals,
+      borderColor: FF.colors.gold, backgroundColor: FF.gradient(ctx, FF.colors.gold),
+      fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false,
+        callbacks: { label: c => FF.ils(c.parsed.y) } } },
+      interaction: { mode: 'index', intersect: false },
+      scales: { y: { ticks: { callback: v => '₪'+(v/1000).toFixed(0)+'k' } } } }
+  });
+  // Update milestone values in countdown card
+  const milestoneEl = document.getElementById('forecast-milestones');
+  if (milestoneEl) milestoneEl.innerHTML =
+    `<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:11px;color:var(--text3)">5 years</div><div style="font-weight:600;color:var(--accent)">${FF.ils(vals[5])}</div></div>
+     <div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:11px;color:var(--text3)">10 years</div><div style="font-weight:600;color:var(--accent)">${FF.ils(vals[10])}</div></div>
+     <div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:11px;color:var(--text3)">18 years</div><div style="font-weight:600;color:var(--accent)">${FF.ils(vals[18])}</div></div>`;
+}
+
+function updateCountdown() {
+  if (!entries.length) return;
+  const sorted = [...entries].sort((a,b) => a.year-b.year || a.month-b.month);
+  const last = sorted[sorted.length-1];
+  const current = last.cumulative_shares;
+  const nextWhole = Math.floor(current) + 1;
+  const needed = nextWhole - current;
+  const rate = liveILSrate || last.usd_ils_rate || 3.7;
+  const ivvPrice = liveIVV || last.ivv_price_usd;
+  const ilsPerMonth = 300;
+  const sharesPerMonth = ivvPrice && rate ? (ilsPerMonth / rate) / ivvPrice : 0;
+  const monthsNeeded = sharesPerMonth > 0 ? Math.ceil(needed / sharesPerMonth) : '?';
+  const pct = (current % 1) * 100;
+  document.getElementById('countdown-display').innerHTML = `
+    <div style="font-size:52px;font-weight:700;color:var(--accent);line-height:1">${monthsNeeded}</div>
+    <div style="font-size:14px;color:var(--text2);margin:6px 0">months until share #${nextWhole}</div>
+    <div style="font-size:12px;color:var(--text3)">${current.toFixed(6)} / ${nextWhole} shares</div>
+    <div style="background:var(--bg3);border-radius:8px;height:10px;margin:14px 4px;overflow:hidden">
+      <div style="background:var(--accent);height:100%;width:${pct.toFixed(1)}%;border-radius:8px;transition:width 0.5s"></div>
+    </div>
+    <div style="font-size:12px;color:var(--text3)">${pct.toFixed(2)}% toward next share</div>
+    <div id="forecast-milestones" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px"></div>`;
+  // Trigger forecast milestones update
+  setTimeout(updateForecast, 100);
+}
+
 async function loadAll() {
   entries   = await FF.get('/api/daughter');
   purchases = await FF.get('/api/ivv-purchases');
@@ -145,6 +231,8 @@ async function loadAll() {
     liveILSrate = live.usd_ils_rate || null;
   } catch(e) {}
   updateKPIs(); renderHistTable(); renderPurchaseTable(); renderCharts();
+  updateCountdown();
+  updateForecast();
 }
 
 // ── KPIs — Current Value based on ACTUAL purchases ──
