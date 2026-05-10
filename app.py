@@ -109,17 +109,22 @@ TBL = 'transactions' if PG else '"transaction"'
 ID_TYPE = 'SERIAL PRIMARY KEY' if PG else 'INTEGER PRIMARY KEY AUTOINCREMENT'
 
 def init_db():
-    conn = get_db()
-    for sql in [
-        f'CREATE TABLE IF NOT EXISTS {TBL} (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, type TEXT NOT NULL, description TEXT NOT NULL, amount REAL NOT NULL)',
-        f'CREATE TABLE IF NOT EXISTS asset_snapshot (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, account_name TEXT NOT NULL, account_type TEXT NOT NULL, balance REAL NOT NULL)',
-        f'CREATE TABLE IF NOT EXISTS mortgage_entry (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, remaining_balance REAL NOT NULL)',
-        f'CREATE TABLE IF NOT EXISTS stock_holding (id {ID_TYPE}, symbol TEXT NOT NULL, purchase_price REAL NOT NULL, quantity REAL NOT NULL, purchase_date TEXT DEFAULT \'\', notes TEXT DEFAULT \'\')',
-        f'CREATE TABLE IF NOT EXISTS daughter_investment (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, ils_invested REAL NOT NULL, usd_ils_rate REAL NOT NULL, ivv_price_usd REAL NOT NULL, shares_purchased REAL NOT NULL, cumulative_shares REAL NOT NULL)',
-        f'CREATE TABLE IF NOT EXISTS ivv_actual_purchase (id {ID_TYPE}, purchase_date TEXT NOT NULL, shares REAL NOT NULL, price_usd REAL NOT NULL)',
-    ]:
-        run_ddl(conn, sql)
-    close_db(conn)
+    try:
+        conn = get_db()
+        for sql in [
+            f'CREATE TABLE IF NOT EXISTS {TBL} (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, type TEXT NOT NULL, description TEXT NOT NULL, amount REAL NOT NULL)',
+            f'CREATE TABLE IF NOT EXISTS asset_snapshot (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, account_name TEXT NOT NULL, account_type TEXT NOT NULL, balance REAL NOT NULL)',
+            f'CREATE TABLE IF NOT EXISTS mortgage_entry (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, remaining_balance REAL NOT NULL)',
+            f'CREATE TABLE IF NOT EXISTS stock_holding (id {ID_TYPE}, symbol TEXT NOT NULL, purchase_price REAL NOT NULL, quantity REAL NOT NULL, purchase_date TEXT DEFAULT \'\', notes TEXT DEFAULT \'\')',
+            f'CREATE TABLE IF NOT EXISTS daughter_investment (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, ils_invested REAL NOT NULL, usd_ils_rate REAL NOT NULL, ivv_price_usd REAL NOT NULL, shares_purchased REAL NOT NULL, cumulative_shares REAL NOT NULL)',
+            f'CREATE TABLE IF NOT EXISTS ivv_actual_purchase (id {ID_TYPE}, purchase_date TEXT NOT NULL, shares REAL NOT NULL, price_usd REAL NOT NULL)',
+        ]:
+            run_ddl(conn, sql)
+        close_db(conn)
+        print('Database initialized successfully')
+    except Exception as e:
+        print(f'WARNING: Database init failed: {e}')
+        print('App will start but DB operations may fail')
 
 init_db()
 
