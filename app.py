@@ -526,6 +526,81 @@ def get_stock_history():
     return jsonify({'series': series, 'holdings': holdings})
 
 # ── Daughter/Romi ─────────────────────────────────────────────────
+@app.route('/api/stocks/ytd', methods=['GET'])
+@auth_required
+def get_stocks_ytd():
+    """Return YTD performance: portfolio vs S&P 500 (SPY)."""
+    from datetime import date as dt
+    today = dt.today()
+    jan1 = dt(today.year, 1, 1)
+    epoch = dt(1970, 1, 1)
+    p1 = int((jan1 - epoch).days) * 86400
+    p2 = int((today - epoch).days) * 86400 + 86400
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://finance.yahoo.com',
+    }
+
+    def ytd_pct(sym):
+        for host in ['query1', 'query2']:
+            try:
+                url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&period1={p1}&period2={p2}'
+                data = req_lib.get(url, timeout=10, headers=headers).json()['chart']['result'][0]
+                closes = [c for c in data['indicators']['quote'][0].get('close', []) if c is not None]
+                if len(closes) >= 2:
+                    return round((closes[-1] - closes[0]) / closes[0] * 100, 2)
+            except Exception:
+                continue
+        return None
+
+    # S&P 500 YTD via SPY
+    sp500_ytd = ytd_pct('SPY')
+
+    # Portfolio YTD: weighted by current value
+    conn = get_db()
+    holdings = q(conn, 'SELECT symbol, quantity, purchase_price FROM stock_holding')
+    close_db(conn)
+
+    symbols = list(set(h['symbol'] for h in holdings if h['symbol']))
+    sym_ytd = {}
+    sym_price = {}
+    for sym in symbols:
+        pct = ytd_pct(sym)
+        sym_ytd[sym] = pct
+        # Get current price for weighting
+        try:
+            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d'
+            data = req_lib.get(url, timeout=8, headers=headers).json()['chart']['result'][0]
+            closes = [c for c in data['indicators']['quote'][0].get('close', []) if c is not None]
+            sym_price[sym] = closes[-1] if closes else data['meta'].get('regularMarketPrice', 0)
+        except Exception:
+            sym_price[sym] = 0
+
+    # Weighted portfolio YTD
+    total_val = sum((sym_price.get(h['symbol'], 0) or float(h['purchase_price'])) * float(h['quantity'])
+                    for h in holdings)
+    portfolio_ytd = None
+    if total_val > 0 and any(sym_ytd.get(h['symbol']) is not None for h in holdings):
+        weighted = 0
+        for h in holdings:
+            sym = h['symbol']
+            val = (sym_price.get(sym, 0) or float(h['purchase_price'])) * float(h['quantity'])
+            pct = sym_ytd.get(sym)
+            if pct is not None:
+                weighted += (val / total_val) * pct
+        portfolio_ytd = round(weighted, 2)
+
+    return jsonify({
+        'portfolio_ytd': portfolio_ytd,
+        'sp500_ytd': sp500_ytd,
+        'beating': (portfolio_ytd is not None and sp500_ytd is not None and portfolio_ytd > sp500_ytd),
+        'diff': round(portfolio_ytd - sp500_ytd, 2) if portfolio_ytd is not None and sp500_ytd is not None else None,
+        'year': today.year,
+        'per_symbol': {sym: sym_ytd[sym] for sym in sym_ytd}
+    })
+
 @app.route('/api/daughter', methods=['GET'])
 @auth_required
 def get_daughter():
