@@ -11,6 +11,18 @@
     <div class="kpi-card"><div class="kpi-label">Total P&amp;L</div><div class="kpi-value" id="kpi-pnl">—</div></div>
     <div class="kpi-card blue"><div class="kpi-label">P&amp;L %</div><div class="kpi-value blue" id="kpi-pct">—</div></div>
     <div class="kpi-card"><div class="kpi-label">Holdings</div><div class="kpi-value" id="kpi-cnt">0</div></div>
+    <div class="kpi-card" id="kpi-ytd-card">
+      <div class="kpi-label">YTD vs S&amp;P 500</div>
+      <div class="kpi-value" id="kpi-ytd-result">Loading…</div>
+      <div class="kpi-sub" id="kpi-ytd-sub" style="margin-top:4px;font-size:11px"></div>
+    </div>
+  </div>
+
+  <!-- YTD breakdown bar -->
+  <div class="card mb-24" id="ytd-card" style="display:none">
+    <div class="card-title mb-4">Year-to-Date Performance <span id="ytd-year" style="color:var(--text3);font-weight:400"></span></div>
+    <div class="card-subtitle mb-16">Your portfolio vs S&P 500 index</div>
+    <div class="chart-wrap" style="height:200px"><canvas id="ytd-chart"></canvas></div>
   </div>
 
   <!-- Portfolio over time chart -->
@@ -350,13 +362,79 @@ async function init() {
   holdings.forEach(h => { h._del = false; h._new = false; });
   buildTable(); updateKPIs(); buildCharts();
   if (holdings.filter(h => !h._del && h.symbol).length) {
-    // Load prices and timeline independently so one failure doesn't block the other
     doRefreshPrices().catch(e => console.error('Price fetch error:', e));
     buildTimelineChart().catch(e => {
       console.error('Timeline error:', e);
       const sub = document.querySelector('.card.mb-24 .card-subtitle');
       if (sub) sub.textContent = 'Timeline unavailable — add purchase dates to holdings';
     });
+    loadYTD().catch(e => console.error('YTD error:', e));
+  }
+}
+
+let ytdChart = null;
+async function loadYTD() {
+  try {
+    const data = await FF.get('/api/stocks/ytd');
+    const card = document.getElementById('kpi-ytd-card');
+    const result = document.getElementById('kpi-ytd-result');
+    const sub = document.getElementById('kpi-ytd-sub');
+    const ytdCard = document.getElementById('ytd-card');
+
+    const portYTD = data.portfolio_ytd;
+    const spYTD   = data.sp500_ytd;
+    const diff    = data.diff;
+    const beating = data.beating;
+
+    if (portYTD !== null) {
+      result.textContent = (portYTD >= 0 ? '+' : '') + portYTD.toFixed(2) + '%';
+      result.className   = 'kpi-value ' + (portYTD >= 0 ? 'green' : 'red');
+      card.className     = 'kpi-card ' + (beating ? 'green' : '');
+
+      if (spYTD !== null && diff !== null) {
+        const emoji = beating ? '🏆' : '📉';
+        sub.innerHTML = `${emoji} vs S&P: ${spYTD >= 0 ? '+' : ''}${spYTD.toFixed(2)}%<br>
+          <span style="color:${beating ? 'var(--green)' : 'var(--red)'}">
+            ${beating ? '+' : ''}${diff.toFixed(2)}% ${beating ? 'ahead' : 'behind'}
+          </span>`;
+      }
+
+      // Show bar chart comparing all symbols + S&P
+      const perSym = data.per_symbol || {};
+      const labels = [...Object.keys(perSym), 'S&P 500'];
+      const values = [...Object.values(perSym), spYTD];
+      if (labels.length > 1) {
+        ytdCard.style.display = 'block';
+        document.getElementById('ytd-year').textContent = data.year + ' YTD';
+        const ctx = document.getElementById('ytd-chart').getContext('2d');
+        if (ytdChart) ytdChart.destroy();
+        ytdChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{
+              data: values,
+              backgroundColor: values.map((v, i) =>
+                labels[i] === 'S&P 500' ? 'rgba(91,141,246,0.7)' :
+                v >= (spYTD || 0) ? 'rgba(76,175,136,0.75)' : 'rgba(224,92,106,0.75)'),
+              borderRadius: 4
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false },
+              tooltip: { callbacks: { label: ctx => (ctx.parsed.y >= 0 ? '+' : '') + ctx.parsed.y.toFixed(2) + '%' } }
+            },
+            scales: { y: { ticks: { callback: v => v + '%' } } }
+          }
+        });
+      }
+    } else {
+      result.textContent = 'No data';
+      result.className = 'kpi-value';
+    }
+  } catch(e) {
+    document.getElementById('kpi-ytd-result').textContent = 'Error';
   }
 }
 
