@@ -37,8 +37,65 @@
     <div class="card"><div class="card-title mb-16">P&amp;L per Position</div><div class="chart-wrap"><canvas id="c-pnl"></canvas></div></div>
   </div>
 
-  <div class="card">
+  <!-- Realized Trades -->
+  <div class="card mb-24">
     <div class="flex-between mb-16">
+      <div>
+        <div class="card-title">Realized Trades</div>
+        <div class="card-subtitle">Log sells — cost basis auto-filled from your holdings average</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="showSellForm()">+ Log Sell</button>
+    </div>
+
+    <!-- Sell form -->
+    <div id="sell-form" style="display:none;background:var(--bg3);border-radius:8px;padding:16px;margin-bottom:16px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;align-items:end">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Symbol</label>
+          <input type="text" id="s-sym" class="form-input" placeholder="QQQ" style="text-transform:uppercase" oninput="autoFillCostBasis()" />
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Date Sold</label>
+          <input type="date" id="s-date" class="form-input" />
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Shares Sold</label>
+          <input type="number" id="s-shares" class="form-input" step="0.000001" placeholder="e.g. 2" oninput="updateSellPreview()" />
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Sell Price ($)</label>
+          <input type="number" id="s-price" class="form-input" step="0.01" placeholder="e.g. 620.50" oninput="updateSellPreview()" />
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Cost Basis ($/share)</label>
+          <input type="number" id="s-cost" class="form-input" step="0.01" placeholder="auto from holdings" oninput="updateSellPreview()" />
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Notes</label>
+          <input type="text" id="s-notes" class="form-input" placeholder="optional" />
+        </div>
+      </div>
+      <!-- Preview -->
+      <div id="sell-preview" style="margin-top:12px;padding:10px 14px;background:var(--bg2);border-radius:6px;font-size:13px;color:var(--text2)"></div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-primary btn-sm" onclick="doAddTrade()">Save Trade</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('sell-form').style.display='none'">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Realized summary -->
+    <div id="realized-summary" style="display:none;margin-bottom:16px" class="kpi-grid" style="grid-template-columns:repeat(3,1fr)"></div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Symbol</th><th>Date</th><th>Shares</th>
+          <th>Sell Price</th><th>Cost Basis</th><th>Proceeds</th><th>P&amp;L</th><th>Return</th><th>Notes</th><th></th>
+        </tr></thead>
+        <tbody id="trades-tbody"></tbody>
+      </table>
+    </div>
+  </div>
       <div>
         <div class="card-title">Holdings</div>
         <div class="card-subtitle">Enter details → Save All → prices load automatically</div>
@@ -357,14 +414,119 @@ function buildCharts() {
   });
 }
 
+let trades = [];
+
+async function loadTrades() {
+  trades = await FF.get('/api/stock-trades');
+  renderTrades();
+}
+
+function renderTrades() {
+  const tb = document.getElementById('trades-tbody');
+  tb.innerHTML = '';
+  if (!trades.length) {
+    tb.innerHTML = '<tr><td colspan="10"><div class="empty-state"><p>No realized trades yet. Log a sell to track your realized gains.</p></div></td></tr>';
+    document.getElementById('realized-summary').style.display = 'none';
+    return;
+  }
+  let totalPnl = 0, totalProceeds = 0, totalCost = 0;
+  trades.forEach(t => {
+    const proceeds = t.shares * t.sell_price;
+    const cost     = t.shares * t.cost_basis;
+    const pnl      = proceeds - cost;
+    const ret      = cost > 0 ? (pnl / cost) * 100 : 0;
+    totalPnl += pnl; totalProceeds += proceeds; totalCost += cost;
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td class="td-mono" style="font-weight:600">${t.symbol}</td>` +
+      `<td>${t.trade_date}</td>` +
+      `<td class="td-mono">${parseFloat(t.shares).toFixed(4)}</td>` +
+      `<td class="td-mono">$${FF.dec(t.sell_price)}</td>` +
+      `<td class="td-mono">$${FF.dec(t.cost_basis)}</td>` +
+      `<td class="td-mono">$${FF.dec(proceeds)}</td>` +
+      `<td class="td-mono ${pnl>=0?'td-positive':'td-negative'}">${pnl>=0?'+':''} $${FF.dec(pnl)}</td>` +
+      `<td class="td-mono ${ret>=0?'td-positive':'td-negative'}">${ret>=0?'+':''}${ret.toFixed(2)}%</td>` +
+      `<td style="font-size:12px;color:var(--text3)">${t.notes||''}</td>` +
+      `<td><button class="btn btn-danger btn-icon" onclick="doDeleteTrade(${t.id})">✕</button></td>`;
+    tb.appendChild(tr);
+  });
+
+  // Realized summary KPIs
+  const totalRet = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+  document.getElementById('realized-summary').style.display = 'grid';
+  document.getElementById('realized-summary').innerHTML = `
+    <div class="kpi-card"><div class="kpi-label">Total Proceeds</div><div class="kpi-value">$${FF.dec(totalProceeds)}</div></div>
+    <div class="kpi-card ${totalPnl>=0?'green':'red'}"><div class="kpi-label">Realized P&L</div><div class="kpi-value ${totalPnl>=0?'green':'red'}">${totalPnl>=0?'+':''} $${FF.dec(totalPnl)}</div></div>
+    <div class="kpi-card ${totalRet>=0?'green':'red'}"><div class="kpi-label">Realized Return</div><div class="kpi-value ${totalRet>=0?'green':'red'}">${totalRet>=0?'+':''}${totalRet.toFixed(2)}%</div></div>`;
+}
+
+function showSellForm() {
+  document.getElementById('sell-form').style.display = 'block';
+  document.getElementById('s-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('s-sym').focus();
+}
+
+function autoFillCostBasis() {
+  const sym = document.getElementById('s-sym').value.toUpperCase().trim();
+  const h = holdings.filter(x => !x._del && (x.symbol||'').toUpperCase() === sym);
+  if (h.length) {
+    const totalQty  = h.reduce((s,x) => s + (+x.quantity||0), 0);
+    const totalCost = h.reduce((s,x) => s + (+x.quantity||0)*(+x.purchase_price||0), 0);
+    const avgCost   = totalQty > 0 ? totalCost / totalQty : 0;
+    document.getElementById('s-cost').value = avgCost.toFixed(4);
+    document.getElementById('s-cost').style.color = 'var(--green)';
+  } else {
+    document.getElementById('s-cost').value = '';
+    document.getElementById('s-cost').style.color = '';
+  }
+  updateSellPreview();
+}
+
+function updateSellPreview() {
+  const shares = parseFloat(document.getElementById('s-shares').value) || 0;
+  const price  = parseFloat(document.getElementById('s-price').value)  || 0;
+  const cost   = parseFloat(document.getElementById('s-cost').value)   || 0;
+  const prev   = document.getElementById('sell-preview');
+  if (!shares || !price) { prev.textContent = ''; return; }
+  const proceeds = shares * price;
+  const basis    = shares * cost;
+  const pnl      = proceeds - basis;
+  const ret      = basis > 0 ? (pnl / basis) * 100 : 0;
+  prev.innerHTML = `Proceeds: <strong>$${FF.dec(proceeds)}</strong> &nbsp;|&nbsp; ` +
+    `P&L: <strong style="color:${pnl>=0?'var(--green)':'var(--red)'}">${pnl>=0?'+':''}$${FF.dec(pnl)}</strong> &nbsp;|&nbsp; ` +
+    `Return: <strong style="color:${ret>=0?'var(--green)':'var(--red)'}">${ret>=0?'+':''}${ret.toFixed(2)}%</strong>`;
+}
+
+async function doAddTrade() {
+  const sym    = document.getElementById('s-sym').value.toUpperCase().trim();
+  const date   = document.getElementById('s-date').value;
+  const shares = parseFloat(document.getElementById('s-shares').value);
+  const price  = parseFloat(document.getElementById('s-price').value);
+  const cost   = parseFloat(document.getElementById('s-cost').value) || 0;
+  const notes  = document.getElementById('s-notes').value;
+  if (!sym || !date || !shares || !price) { FF.toast('Fill in symbol, date, shares and price', 'error'); return; }
+  await FF.post('/api/stock-trades', { symbol:sym, trade_date:date, shares, sell_price:price, cost_basis:cost, notes });
+  document.getElementById('sell-form').style.display = 'none';
+  FF.toast('Trade saved!');
+  await loadTrades();
+  loadYTD().catch(() => {});
+}
+
+async function doDeleteTrade(id) {
+  if (!confirm('Delete this trade?')) return;
+  await FF.del('/api/stock-trades/' + id);
+  await loadTrades();
+  loadYTD().catch(() => {});
+}
+
 async function init() {
   try { holdings = await FF.get('/api/stocks'); } catch(e) { holdings = []; }
   holdings.forEach(h => { h._del = false; h._new = false; });
   buildTable(); updateKPIs(); buildCharts();
+  loadTrades().catch(() => {});
   if (holdings.filter(h => !h._del && h.symbol).length) {
     doRefreshPrices().catch(e => console.error('Price fetch error:', e));
     buildTimelineChart().catch(e => {
-      console.error('Timeline error:', e);
       const sub = document.querySelector('.card.mb-24 .card-subtitle');
       if (sub) sub.textContent = 'Timeline unavailable — add purchase dates to holdings';
     });
