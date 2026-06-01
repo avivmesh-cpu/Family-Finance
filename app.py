@@ -118,6 +118,7 @@ def init_db():
             f'CREATE TABLE IF NOT EXISTS stock_holding (id {ID_TYPE}, symbol TEXT NOT NULL, purchase_price REAL NOT NULL, quantity REAL NOT NULL, purchase_date TEXT DEFAULT \'\', notes TEXT DEFAULT \'\')',
             f'CREATE TABLE IF NOT EXISTS daughter_investment (id {ID_TYPE}, year INT NOT NULL, month INT NOT NULL, ils_invested REAL NOT NULL, usd_ils_rate REAL NOT NULL, ivv_price_usd REAL NOT NULL, shares_purchased REAL NOT NULL, cumulative_shares REAL NOT NULL)',
             f'CREATE TABLE IF NOT EXISTS ivv_actual_purchase (id {ID_TYPE}, purchase_date TEXT NOT NULL, shares REAL NOT NULL, price_usd REAL NOT NULL)',
+            f'CREATE TABLE IF NOT EXISTS stock_trade (id {ID_TYPE}, symbol TEXT NOT NULL, trade_date TEXT NOT NULL, shares REAL NOT NULL, sell_price REAL NOT NULL, cost_basis REAL NOT NULL, notes TEXT DEFAULT \'\')',
         ]:
             run_ddl(conn, sql)
         close_db(conn)
@@ -526,6 +527,43 @@ def get_stock_history():
     return jsonify({'series': series, 'holdings': holdings})
 
 # ── Daughter/Romi ─────────────────────────────────────────────────
+# ── Stock Trades (realized sells) ────────────────────────────────
+@app.route('/api/stock-trades', methods=['GET'])
+@auth_required
+def get_stock_trades():
+    conn = get_db()
+    r = q(conn, 'SELECT * FROM stock_trade ORDER BY trade_date DESC')
+    close_db(conn)
+    return jsonify(r)
+
+@app.route('/api/stock-trades', methods=['POST'])
+@auth_required
+def add_stock_trade():
+    d = request.json
+    sym = d['symbol'].upper().strip()
+    conn = get_db()
+    # Auto-calculate cost basis from holdings if not provided
+    cost_basis = float(d.get('cost_basis', 0))
+    if not cost_basis:
+        holdings = q(conn, 'SELECT purchase_price, quantity FROM stock_holding WHERE symbol=?', (sym,))
+        if holdings:
+            total_qty = sum(float(h['quantity']) for h in holdings)
+            total_cost = sum(float(h['purchase_price']) * float(h['quantity']) for h in holdings)
+            cost_basis = (total_cost / total_qty) if total_qty else 0
+    run(conn, 'INSERT INTO stock_trade (symbol,trade_date,shares,sell_price,cost_basis,notes) VALUES (?,?,?,?,?,?)',
+        (sym, d['trade_date'], float(d['shares']), float(d['sell_price']),
+         cost_basis, d.get('notes', '')))
+    close_db(conn)
+    return jsonify({'status': 'ok', 'cost_basis_used': cost_basis})
+
+@app.route('/api/stock-trades/<int:tid>', methods=['DELETE'])
+@auth_required
+def delete_stock_trade(tid):
+    conn = get_db()
+    run(conn, 'DELETE FROM stock_trade WHERE id=?', (tid,))
+    close_db(conn)
+    return jsonify({'status': 'ok'})
+
 @app.route('/api/stocks/ytd', methods=['GET'])
 @auth_required
 def get_stocks_ytd():
@@ -592,13 +630,23 @@ def get_stocks_ytd():
                 weighted += (val / total_val) * pct
         portfolio_ytd = round(weighted, 2)
 
+    # Include realized gains from sells this year
+    conn2 = get_db()
+    trades = q(conn2, 'SELECT * FROM stock_trade WHERE trade_date >= ?', (f'{today.year}-01-01',))
+    close_db(conn2)
+    realized_pnl = sum((float(t['sell_price']) - float(t['cost_basis'])) * float(t['shares']) for t in trades)
+    realized_cost = sum(float(t['cost_basis']) * float(t['shares']) for t in trades)
+
     return jsonify({
         'portfolio_ytd': portfolio_ytd,
         'sp500_ytd': sp500_ytd,
         'beating': (portfolio_ytd is not None and sp500_ytd is not None and portfolio_ytd > sp500_ytd),
         'diff': round(portfolio_ytd - sp500_ytd, 2) if portfolio_ytd is not None and sp500_ytd is not None else None,
         'year': today.year,
-        'per_symbol': {sym: sym_ytd[sym] for sym in sym_ytd}
+        'per_symbol': {sym: sym_ytd[sym] for sym in sym_ytd},
+        'realized_pnl': round(realized_pnl, 2),
+        'realized_cost': round(realized_cost, 2),
+        'realized_trades': len(trades)
     })
 
 @app.route('/api/daughter', methods=['GET'])
