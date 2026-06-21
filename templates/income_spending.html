@@ -22,20 +22,8 @@
   </div>
 
   <div class="grid-2 mb-24">
-    <div class="card">
-      <div class="flex-between mb-4">
-        <div><div class="card-title mb-0">Spending by Category</div></div>
-        <button class="btn btn-ghost btn-sm" onclick="exportChart('cat-chart','spending-category')">⬇ PNG</button>
-      </div>
-      <div class="chart-wrap" style="height:340px"><canvas id="cat-chart"></canvas></div>
-    </div>
-    <div class="card">
-      <div class="flex-between mb-4">
-        <div><div class="card-title mb-0">12-Month Trend</div></div>
-        <button class="btn btn-ghost btn-sm" onclick="exportChart('trend-chart','income-trend')">⬇ PNG</button>
-      </div>
-      <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
-    </div>
+    <div class="card"><div class="card-title mb-16">Spending by Category</div><div class="chart-wrap" style="height:340px"><canvas id="cat-chart"></canvas></div></div>
+    <div class="card"><div class="card-title mb-16">12-Month Trend</div><div class="chart-wrap"><canvas id="trend-chart"></canvas></div></div>
   </div>
 
   <div class="card mb-24">
@@ -83,7 +71,6 @@
 {% block scripts %}
 <script>
 let CY,CM,rows=[],tChart=null,cChart=null;
-function exportChart(id,name){const a=document.createElement('a');a.download=name+'-'+new Date().toISOString().split('T')[0]+'.png';a.href=document.getElementById(id).toDataURL('image/png');a.click();}
 const CATS={Housing:'#5b8df6',Food:'#4caf88',Transport:'#c9a84c',Health:'#e05c6a',Education:'#9b7cf8',Utilities:'#4cc9c9',Insurance:'#f08c4b',Children:'#e87dbd',Entertainment:'#7dc8e8',Clothing:'#a8d86e',Other:'#9aa0bb'};
 function getYM(){const[y,m]=document.getElementById('month-picker').value.split('-');return{year:+y,month:+m};}
 function getCat(d){const m=d.match(/^\[([^\]]+)\]/);return m?m[1]:'Other';}
@@ -152,9 +139,13 @@ async function loadData(){
     data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
   }
 
-  // Seed fixed expenses if no expenses exist yet for this month
-  if(!data.some(r=>r.type==='expense')){
-    for(const e of FIXED_EXPENSES){
+  // Seed any MISSING fixed expenses (checks each one individually, not all-or-nothing)
+  const existingDescs = new Set(
+    data.filter(r=>r.type==='expense').map(r=>getDesc(r.description))
+  );
+  const missing = FIXED_EXPENSES.filter(e => !existingDescs.has(e.desc));
+  if(missing.length){
+    for(const e of missing){
       await FF.post('/api/transactions',{year,month,type:'expense',description:'['+e.cat+'] '+e.desc,amount:0});
     }
     data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
@@ -337,9 +328,7 @@ async function buildTrendChart(){
       datasets:[
         {label:'Income',data:keys.map(k=>(summary[k].salary||0)+(summary[k].other_income||0)),borderColor:FF.colors.green,tension:0.4,fill:false,pointRadius:3},
         {label:'Expenses',data:keys.map(k=>summary[k].expenses||0),borderColor:FF.colors.red,tension:0.4,fill:false,pointRadius:3}]},
-    options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{position:'top'}, tooltip:{mode:'index',intersect:false,callbacks:{label:ctx=>ctx.dataset.label+': '+FF.ils(ctx.parsed.y)}}},
-      interaction:{mode:'index',intersect:false},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top'}},
       scales:{y:{ticks:{callback:v=>'\u20AA'+(v/1000).toFixed(0)+'k'}}}}});
 }
 
