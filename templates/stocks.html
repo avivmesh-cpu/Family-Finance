@@ -333,52 +333,59 @@ async function buildTimelineChart() {
   }
 
   const series   = histData.series || {};
-  const holdingsDB = histData.holdings || [];
 
-  // Build sorted list of all dates across all symbols
+  // Sort all purchases by date
+  const withDatesSorted = [...withDates].sort((a,b) => a.purchase_date.localeCompare(b.purchase_date));
+
+  // Build sorted list of all dates: only from earliest purchase date to today
+  const earliest = withDatesSorted[0].purchase_date;
+  const today = new Date().toISOString().split('T')[0];
   const allDates = new Set();
-  Object.values(series).forEach(dayMap => Object.keys(dayMap).forEach(d => allDates.add(d)));
+  Object.values(series).forEach(dayMap => Object.keys(dayMap).filter(d => d >= earliest).forEach(d => allDates.add(d)));
+  withDatesSorted.forEach(h => allDates.add(h.purchase_date));
+  allDates.add(today);
+  const sortedDates = [...allDates].sort().filter(d => d >= earliest && d <= today);
 
-  // Also add purchase dates as boundary points
-  withDates.forEach(h => allDates.add(h.purchase_date));
-  allDates.add(new Date().toISOString().split('T')[0]);
+  // Track purchase events for annotation dots
+  const purchaseDates = new Set(withDatesSorted.map(h => h.purchase_date));
 
-  const sortedDates = [...allDates].sort();
-
-  // For each date, compute portfolio value = sum of (qty × price on that date) for holdings purchased by that date
   const costData  = [];
   const valueData = [];
 
   sortedDates.forEach(date => {
-    // Cost basis: sum of cost for all holdings purchased on or before this date
+    // Cost basis: cumulative cost of all holdings bought on or before this date
     let cost = 0;
-    withDates.filter(h => h.purchase_date <= date).forEach(h => {
+    withDatesSorted.filter(h => h.purchase_date <= date).forEach(h => {
       cost += (+h.quantity || 0) * (+h.purchase_price || 0);
     });
     costData.push(cost);
 
-    // Portfolio value: use historical price for that date, fallback to nearest price or live price
+    // Portfolio value: use historical price for each holding bought by this date
     let val = 0;
-    withDates.filter(h => h.purchase_date <= date).forEach(h => {
+    withDatesSorted.filter(h => h.purchase_date <= date).forEach(h => {
       const sym = (h.symbol || '').toUpperCase();
       const dayPrices = series[sym] || {};
-      // Find the price: exact date, or scan backwards up to 5 days for last trading day
+      // Scan back up to 7 days to find a trading day price
       let price = null;
-      for (let i = 0; i <= 5; i++) {
+      for (let i = 0; i <= 7; i++) {
         const d = new Date(date);
         d.setDate(d.getDate() - i);
         const key = d.toISOString().split('T')[0];
         if (dayPrices[key]) { price = dayPrices[key]; break; }
       }
-      if (!price) price = prices[sym] || (+h.purchase_price || 0);
+      // IMPORTANT: fallback to purchase price (not live price!) to avoid jumps
+      if (!price) price = +h.purchase_price || 0;
       val += (+h.quantity || 0) * price;
     });
     valueData.push(val);
   });
 
-  document.querySelector('.card.mb-24 .card-subtitle').textContent = 'Cumulative cost basis vs daily market value';
+  if (sub) sub.textContent = 'Cumulative cost basis vs daily market value — dots = purchase events';
 
-  // Decide how many x-axis ticks to show (max ~10)
+  // Point radius: bigger dot on purchase dates, invisible otherwise
+  const pointRadii = sortedDates.map(d => purchaseDates.has(d) ? 6 : 0);
+  const pointStyles = sortedDates.map(d => purchaseDates.has(d) ? 'circle' : 'circle');
+
   const tickStep = Math.max(1, Math.floor(sortedDates.length / 10));
 
   tlC = new Chart(c3, { type: 'line',
@@ -392,7 +399,11 @@ async function buildTimelineChart() {
         { label: 'Portfolio Value', data: valueData,
           borderColor: FF.colors.gold, backgroundColor: FF.gradient(c3, FF.colors.gold),
           tension: 0.3, fill: true,
-          pointRadius: 0, pointHoverRadius: 5,
+          pointRadius: pointRadii,
+          pointBackgroundColor: sortedDates.map(d => purchaseDates.has(d) ? '#fff' : FF.colors.gold),
+          pointBorderColor: FF.colors.gold,
+          pointBorderWidth: 2,
+          pointHoverRadius: 8,
           borderWidth: 2 }
       ]
     },
@@ -402,23 +413,19 @@ async function buildTimelineChart() {
         tooltip: {
           mode: 'index', intersect: false,
           callbacks: {
-            title: items => items[0]?.label || '',
+            title: items => {
+              const d = items[0]?.label || '';
+              return d + (purchaseDates.has(d) ? ' 🛒 Purchase' : '');
+            },
             label: ctx => ctx.dataset.label + ': $' + FF.dec(ctx.parsed.y)
           }
         }
       },
       hover: { mode: 'index', intersect: false },
       scales: {
-        x: {
-          ticks: {
-            maxTicksLimit: 10,
-            maxRotation: 45,
-            callback: function(val, idx) {
-              // Only show every Nth label
-              return idx % tickStep === 0 ? this.getLabelForValue(val) : '';
-            }
-          }
-        },
+        x: { ticks: { maxTicksLimit: 10, maxRotation: 45,
+          callback: function(val, idx) { return idx % tickStep === 0 ? this.getLabelForValue(val) : ''; }
+        }},
         y: { ticks: { callback: v => '$' + (v/1000).toFixed(1) + 'k' } }
       },
       interaction: { mode: 'index', intersect: false }
