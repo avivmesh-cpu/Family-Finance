@@ -37,6 +37,20 @@
     <div class="card"><div class="card-title mb-16">P&amp;L per Position</div><div class="chart-wrap"><canvas id="c-pnl"></canvas></div></div>
   </div>
 
+  <!-- Purchase History -->
+  <div class="card mb-24">
+    <div class="card-title mb-4">Purchase History</div>
+    <div class="card-subtitle mb-16">All buys sorted by date</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Date</th><th>Symbol</th><th>Shares</th><th>Price ($)</th><th>Total Cost ($)</th><th>Current Value ($)</th><th>Unrealized P&amp;L</th>
+        </tr></thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- Realized Trades -->
   <div class="card mb-24">
     <div class="flex-between mb-16">
@@ -137,8 +151,7 @@ async function doRefreshPrices() {
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
     prices = data.prices !== undefined ? data.prices : data;
-    buildTable(); updateKPIs(); buildCharts();
-    const found = Object.entries(prices).filter(([k,v]) => v).map(([k,v]) => k + ' $' + Number(v).toFixed(2)).join('  |  ');
+    buildTable(); updateKPIs(); buildCharts();    const found = Object.entries(prices).filter(([k,v]) => v).map(([k,v]) => k + ' $' + Number(v).toFixed(2)).join('  |  ');
     status.textContent = found || 'No prices found — check symbols';
     status.style.color = found ? 'var(--green)' : 'var(--red)';
   } catch(e) {
@@ -153,6 +166,7 @@ function buildTable() {
   const active = holdings.filter(h => !h._del);
   if (!active.length) {
     tb.innerHTML = '<tr><td colspan="11"><div class="empty-state"><p>No holdings. Click + Add.</p></div></td></tr>';
+    renderHistory([]);
     return;
   }
   active.forEach(h => {
@@ -180,6 +194,39 @@ function buildTable() {
       '<td class="td-mono ' + (pct === null ? '' : pct >= 0 ? 'td-positive' : 'td-negative') + '" id="pct-' + h.id + '">' + (pct !== null ? (pct >= 0 ? '+' : '') + FF.dec(pct) + '%' : '—') + '</td>' +
       '<td><input class="editable-cell" data-f="notes" value="' + (h.notes || '') + '" placeholder="notes..." style="width:90px" /></td>' +
       '<td><button class="btn btn-danger btn-icon" onclick="delRow(' + h.id + ')">&#x2715;</button></td>';
+    tb.appendChild(tr);
+  });
+  renderHistory(active);
+}
+
+function renderHistory(active) {
+  const tb = document.getElementById('history-tbody');
+  if (!tb) return;
+  tb.innerHTML = '';
+  // Sort by date ascending
+  const sorted = [...active].filter(h => h.purchase_date).sort((a, b) => a.purchase_date.localeCompare(b.purchase_date));
+  // Also include items with no date at end
+  const noDates = active.filter(h => !h.purchase_date);
+  const all = [...sorted, ...noDates];
+  if (!all.length) {
+    tb.innerHTML = '<tr><td colspan="7"><div class="empty-state"><p>Add purchase dates to see history.</p></div></td></tr>';
+    return;
+  }
+  all.forEach(h => {
+    const sym = (h.symbol || '').toUpperCase();
+    const cur = prices[sym] || null;
+    const cost = (+h.quantity || 0) * (+h.purchase_price || 0);
+    const val = cur ? (+h.quantity || 0) * cur : null;
+    const pnl = val !== null ? val - cost : null;
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td class="td-mono">' + (h.purchase_date || '<span style="color:var(--text3)">—</span>') + '</td>' +
+      '<td class="td-mono" style="font-weight:600;color:var(--accent)">' + sym + '</td>' +
+      '<td class="td-mono">' + (+h.quantity || 0).toFixed(4) + '</td>' +
+      '<td class="td-mono">$' + FF.dec(h.purchase_price) + '</td>' +
+      '<td class="td-mono">$' + FF.dec(cost) + '</td>' +
+      '<td class="td-mono" style="color:' + (cur ? 'var(--text)' : 'var(--text3)') + '">' + (val !== null ? '$' + FF.dec(val) : '—') + '</td>' +
+      '<td class="td-mono ' + (pnl === null ? '' : pnl >= 0 ? 'td-positive' : 'td-negative') + '">' + (pnl !== null ? (pnl >= 0 ? '+' : '') + ' $' + FF.dec(pnl) : '—') + '</td>';
     tb.appendChild(tr);
   });
 }
