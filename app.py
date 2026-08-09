@@ -377,23 +377,41 @@ def add_stock():
     new_qty = float(d['quantity'])
     new_price = float(d['purchase_price'])
     conn = get_db()
-    existing = q(conn, 'SELECT * FROM stock_holding WHERE symbol=?', (sym,))
-    if existing:
-        # Merge: weighted average price, sum quantities
-        old_qty = sum(float(r['quantity']) for r in existing)
-        old_val = sum(float(r['quantity']) * float(r['purchase_price']) for r in existing)
-        total_qty = old_qty + new_qty
-        avg_price = (old_val + new_qty * new_price) / total_qty if total_qty else new_price
-        # Delete all existing rows for this symbol
-        for r in existing:
-            run(conn, 'DELETE FROM stock_holding WHERE id=?', (r['id'],))
-        # Insert one merged row
-        run(conn, 'INSERT INTO stock_holding (symbol,purchase_price,quantity,purchase_date,notes) VALUES (?,?,?,?,?)',
-            (sym, round(avg_price, 4), round(total_qty, 6), d.get('purchase_date',''), d.get('notes','')))
-    else:
-        run(conn, 'INSERT INTO stock_holding (symbol,purchase_price,quantity,purchase_date,notes) VALUES (?,?,?,?,?)',
-            (sym, new_price, new_qty, d.get('purchase_date',''), d.get('notes','')))
-    close_db(conn); return jsonify({'status':'ok'})
+    
+    run(conn, 'INSERT INTO stock_holding (symbol,purchase_price,quantity,purchase_date,notes) VALUES (?,?,?,?,?)',
+        (sym, new_price, new_qty, d.get('purchase_date',''), d.get('notes','')))
+    
+    close_db(conn)
+    return jsonify({'status':'ok'})
+
+@app.route('/api/stocks/details', methods=['GET'])
+@auth_required
+def stock_details():
+    """Fetch price, previous close, and market cap for the classic view."""
+    conn = get_db()
+    rows = q(conn, 'SELECT DISTINCT symbol FROM stock_holding UNION SELECT DISTINCT symbol FROM stock_trade')
+    close_db(conn)
+    
+    res = {}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept': 'application/json'
+    }
+    
+    for r in rows:
+        sym = r['symbol']
+        try:
+            url = f'https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=2d'
+            data = req_lib.get(url, timeout=5, headers=headers).json()['chart']['result'][0]
+            meta = data['meta']
+            price = meta.get('regularMarketPrice', 0)
+            prev = meta.get('chartPreviousClose', price)
+            cap = meta.get('marketCap', 0) 
+            res[sym] = {'price': price, 'prev': prev, 'mktcap': cap}
+        except Exception:
+            res[sym] = {'price': 0, 'prev': 0, 'mktcap': 0}
+            
+    return jsonify(res)
 
 def _yahoo(sym):
     """Fetch current price for a symbol from Yahoo Finance."""
