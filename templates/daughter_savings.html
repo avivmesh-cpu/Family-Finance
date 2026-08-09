@@ -38,9 +38,9 @@
       <div id="countdown-display" style="text-align:center;padding:20px 0"></div>
     </div>
   </div>
-    <div class="card"><div class="card-title mb-16">Cumulative Virtual Shares</div><div class="chart-wrap"><canvas id="c1"></canvas></div></div>
-    <div class="card"><div class="card-title mb-16">Actual Portfolio Value (ILS)</div><div class="chart-wrap"><canvas id="c2"></canvas></div></div>
-  </div>
+
+  <div class="card mb-24"><div class="card-title mb-16">Cumulative Virtual Shares</div><div class="chart-wrap" style="height:250px"><canvas id="c1"></canvas></div></div>
+  <div class="card mb-24"><div class="card-title mb-16">Actual Portfolio Value (ILS)</div><div class="chart-wrap" style="height:250px"><canvas id="c2"></canvas></div></div>
 
   <!-- Actual Purchases — FIRST -->
   <div class="card mb-24">
@@ -188,7 +188,6 @@ function updateForecast() {
       interaction: { mode: 'index', intersect: false },
       scales: { y: { ticks: { callback: v => '₪'+(v/1000).toFixed(0)+'k' } } } }
   });
-  // Update milestone values in countdown card
   const milestoneEl = document.getElementById('forecast-milestones');
   if (milestoneEl) milestoneEl.innerHTML =
     `<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:11px;color:var(--text3)">5 years</div><div style="font-weight:600;color:var(--accent)">${FF.ils(vals[5])}</div></div>
@@ -218,7 +217,6 @@ function updateCountdown() {
     </div>
     <div style="font-size:12px;color:var(--text3)">${pct.toFixed(2)}% toward next share</div>
     <div id="forecast-milestones" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px"></div>`;
-  // Trigger forecast milestones update
   setTimeout(updateForecast, 100);
 }
 
@@ -235,20 +233,16 @@ async function loadAll() {
   updateForecast();
 }
 
-// ── KPIs — Current Value based on ACTUAL purchases ──
 function updateKPIs() {
   if (!entries.length && !purchases.length) return;
   const sorted = [...entries].sort((a,b) => a.year-b.year || a.month-b.month);
   const last = sorted.length ? sorted[sorted.length-1] : null;
   const rate = liveILSrate || (last ? last.usd_ils_rate : 3.7);
 
-  // Current value = actual shares held × live IVV price × rate
   const actualShares   = purchases.reduce((s,p) => s + p.shares, 0);
   const curValUSD      = liveIVV && actualShares ? actualShares * liveIVV : null;
   const curValILS      = curValUSD ? curValUSD * rate : null;
 
-  // Total Invested = shares × price_usd × USD/ILS rate AT the purchase date
-  // Use the closest virtual accumulation entry on or before the purchase date for the rate
   const totalInvestedILS = purchases.reduce((s, p) => {
     const pDate = p.purchase_date;
     const closestEntry = [...entries]
@@ -262,7 +256,6 @@ function updateKPIs() {
     return s + p.shares * p.price_usd * rateAtPurchase;
   }, 0);
 
-  // Gain = Current Value (ILS) - Total Invested (ILS)
   const gainILS = curValILS !== null ? curValILS - totalInvestedILS : null;
 
   if (last) {
@@ -279,7 +272,6 @@ function updateKPIs() {
   }
 }
 
-// ── HISTORY TABLE ──
 function renderHistTable() {
   const tb = document.getElementById('hist-tbody');
   tb.innerHTML = '';
@@ -308,7 +300,6 @@ function renderHistTable() {
   });
 }
 
-// ── PURCHASES TABLE ──
 function renderPurchaseTable() {
   const tb = document.getElementById('purchase-tbody');
   tb.innerHTML = '';
@@ -359,12 +350,10 @@ async function doDeletePurchase(id) {
   await loadAll();
 }
 
-// ── CHARTS ──
 function renderCharts() {
   const sorted = [...entries].sort((a,b) => a.year-b.year || a.month-b.month);
   const labels = sorted.map(r => FF.monthLabel(r.year, r.month));
 
-  // Chart 1: Virtual cumulative shares
   const ctx1 = document.getElementById('c1').getContext('2d');
   if (chart1) chart1.destroy();
   chart1 = new Chart(ctx1, {
@@ -378,19 +367,15 @@ function renderCharts() {
       scales: { y: { ticks: { callback: v => v.toFixed(3) + ' sh' } } } }
   });
 
-  // Chart 2: Actual portfolio value in ILS over time
-  // For each month, calculate actual shares held × IVV price × rate at that month
   const purchasesSorted = [...purchases].sort((a,b) => a.purchase_date.localeCompare(b.purchase_date));
   const ctx2 = document.getElementById('c2').getContext('2d');
   if (chart2) chart2.destroy();
 
   if (!purchasesSorted.length) {
-    // No actual purchases yet — show nothing
     chart2 = null;
     return;
   }
 
-  // Build value per month: shares held at that time × IVV price × rate
   const data2 = sorted.map(r => {
     const monthDate = `${r.year}-${String(r.month).padStart(2,'0')}-15`;
     const sharesHeld = purchasesSorted
