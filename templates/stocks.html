@@ -4,14 +4,24 @@
 {% block page_subtitle %}Comprehensive view of your holdings, allocation, and performance{% endblock %}
 
 {% block content %}
+<!-- Tippy.js CSS for Advanced Tooltips -->
+<link rel="stylesheet" href="https://unpkg.com/tippy.js@6/animations/scale.css" />
+<link rel="stylesheet" href="https://unpkg.com/tippy.js@6/themes/translucent.css" />
+
 <style>
   /* Match native app styling using CSS variables & Responsive Layout */
   .stock-table { width: 100%; border-collapse: collapse; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); }
   .stock-table th { background: var(--bg3); border-bottom: 1px solid var(--border2); text-align: right; padding: 10px; font-weight: 600; color: var(--text2); cursor: pointer; user-select: none; }
-  .stock-table th:first-child { text-align: left; }
+  .stock-table th:first-child { text-align: left; position: sticky; left: 0; z-index: 3; background: var(--bg3); }
   .stock-table th:hover { color: var(--accent); }
   .stock-table td { padding: 10px; border-bottom: 1px solid var(--border2); text-align: right; }
-  .stock-table td:first-child { text-align: left; }
+  
+  /* Sticky First Column for mobile/tablet scrolling */
+  .table-wrap { overflow-x: auto; }
+  .stock-table td:first-child { position: sticky; left: 0; z-index: 2; border-right: 1px solid var(--border2); }
+  .row-main > td:first-child { background: var(--surface); }
+  .row-main:hover > td:first-child { background: var(--bg2); }
+  .row-buy > td:first-child, .row-sell > td:first-child { background: var(--bg); }
   
   .row-main { background: var(--surface); cursor: pointer; font-weight: 500; transition: background 0.2s; }
   .row-main:hover { background: var(--bg2); }
@@ -22,9 +32,23 @@
   .val-red { color: var(--red); }
   .sym-link { color: var(--accent); font-weight: 600; cursor: pointer; }
   
+  /* Skeleton Loading Animation */
+  .skeleton {
+    background: linear-gradient(90deg, var(--bg3) 25%, var(--border2) 50%, var(--bg3) 75%);
+    background-size: 200% 100%;
+    animation: skeletonLoading 1.5s infinite;
+    border-radius: 4px;
+    color: transparent !important;
+    user-select: none;
+  }
+  @keyframes skeletonLoading {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  
   .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; flex-wrap: wrap; gap: 8px; }
   .time-filters { display: flex; gap: 4px; flex-wrap: wrap; }
-  .btn-filter { background: var(--bg3); border: 1px solid var(--border2); color: var(--text); padding: 4px 10px; font-size: 11px; border-radius: 4px; cursor: pointer; font-weight: 500; }
+  .btn-filter { background: var(--bg3); border: 1px solid var(--border2); color: var(--text); padding: 4px 10px; font-size: 11px; border-radius: 4px; cursor: pointer; font-weight: 500; transition: all 0.2s; }
   .btn-filter.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .btn-filter:hover:not(.active) { background: var(--bg2); }
 
@@ -36,52 +60,16 @@
   .holdings-trades-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
 
   /* TRUE RECTANGULAR TREEMAP CSS */
-  .treemap-container {
-    position: relative;
-    width: 100%;
-    height: 350px;
-    margin-top: 8px;
-    border-radius: 8px;
-    overflow: hidden;
-  }
+  .treemap-container { position: relative; width: 100%; height: 350px; margin-top: 8px; border-radius: 8px; overflow: hidden; }
   .treemap-tile-inner {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    border-radius: 6px;
-    color: #fff;
-    text-align: center;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    transition: transform 0.2s, filter 0.2s;
-    cursor: default;
-    overflow: hidden;
-    padding: 4px;
+    width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center;
+    border-radius: 6px; color: #fff; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    transition: transform 0.2s, filter 0.2s; cursor: default; overflow: hidden; padding: 4px;
   }
-  .treemap-tile-inner:hover {
-    filter: brightness(1.15);
-    transform: scale(1.02);
-    z-index: 10;
-  }
-  .treemap-sym {
-    font-weight: 700;
-    font-size: clamp(12px, 1.5vw, 18px);
-    font-family: 'DM Sans', sans-serif;
-    margin-bottom: 2px;
-  }
-  .treemap-pct {
-    font-size: clamp(10px, 1vw, 14px);
-    font-weight: 600;
-    font-family: 'DM Mono', monospace;
-  }
-  .treemap-footer {
-    font-size: clamp(9px, 0.9vw, 12px);
-    opacity: 0.9;
-    font-family: 'DM Mono', monospace;
-    margin-top: 4px;
-  }
+  .treemap-tile-inner:hover { filter: brightness(1.15); transform: scale(1.02); z-index: 10; }
+  .treemap-sym { font-weight: 700; font-size: clamp(12px, 1.5vw, 18px); font-family: 'DM Sans', sans-serif; margin-bottom: 2px; }
+  .treemap-pct { font-size: clamp(10px, 1vw, 14px); font-weight: 600; font-family: 'DM Mono', monospace; }
+  .treemap-footer { font-size: clamp(9px, 0.9vw, 12px); opacity: 0.9; font-family: 'DM Mono', monospace; margin-top: 4px; }
 
   /* Custom Interactive Legend for Pie Chart */
   .pie-legend-container { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; padding-right: 4px; }
@@ -111,10 +99,11 @@
 
   <!-- KPIs -->
   <div class="kpi-grid" id="portfolio-kpis">
-    <div class="kpi-card"><div class="kpi-label">Total Investment (Cost)</div><div class="kpi-value" id="kpi-cost">—</div></div>
-    <div class="kpi-card blue"><div class="kpi-label">Total Market Value</div><div class="kpi-value blue" id="kpi-value">—</div></div>
-    <div class="kpi-card"><div class="kpi-label">All-Time Return</div><div class="kpi-value" id="kpi-return">—</div></div>
-    <div class="kpi-card green"><div class="kpi-label">Realized Trade Profits</div><div class="kpi-value green" id="kpi-realized">—</div></div>
+    <div class="kpi-card"><div class="kpi-label">Total Investment (Cost)</div><div class="kpi-value skeleton" id="kpi-cost">Loading...</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">Total Market Value</div><div class="kpi-value blue skeleton" id="kpi-value">Loading...</div></div>
+    <div class="kpi-card"><div class="kpi-label">All-Time Return</div><div class="kpi-value skeleton" id="kpi-return">Loading...</div></div>
+    <div class="kpi-card green"><div class="kpi-label">Realized Trade Profits</div><div class="kpi-value green skeleton" id="kpi-realized">Loading...</div></div>
+    <div class="kpi-card"><div class="kpi-label">30-Day Volatility</div><div class="kpi-value skeleton" id="kpi-volatility">Loading...</div></div>
   </div>
 
   <!-- Main Chart -->
@@ -147,7 +136,8 @@
           <canvas id="allocation-chart"></canvas>
         </div>
         <div class="pie-legend-container" id="pie-custom-legend">
-          <!-- Interactive legend injected by JS -->
+          <div class="skeleton" style="height:20px; width:100%; margin-bottom:4px;"></div>
+          <div class="skeleton" style="height:20px; width:100%; margin-bottom:4px;"></div>
         </div>
       </div>
     </div>
@@ -162,7 +152,6 @@
           <button class="btn-filter" data-period="ALL">From Purchase</button>
         </div>
       </div>
-      <!-- Changed from flex layout to a relative boundary container -->
       <div class="treemap-container" id="heatmap-container">
         <!-- Dynamically scaled absolutely positioned heatmap tiles injected by JS -->
       </div>
@@ -200,7 +189,9 @@
             </tr>
           </thead>
           <tbody id="portfolio-body">
-            <tr><td colspan="7" style="text-align:center; padding: 20px;">Loading market data...</td></tr>
+            <!-- Skeleton Initial State -->
+            <tr><td colspan="7"><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
+            <tr><td colspan="7"><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -227,7 +218,7 @@
             </tr>
           </thead>
           <tbody id="trades-table-body">
-            <tr><td colspan="6" style="text-align:center; color:var(--text3); padding: 20px;">Loading trades...</td></tr>
+            <tr><td colspan="6"><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -311,7 +302,11 @@
 {% endblock %}
 
 {% block scripts %}
+<!-- Chart.js and Tippy.js Dependencies -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/@popperjs/core@2"></script>
+<script src="https://unpkg.com/tippy.js@6"></script>
+
 <script>
 let portfolioData = {};
 let detailsData = {};
@@ -335,6 +330,12 @@ function formatColor(val, text) {
   if (val > 0) return `<span class="val-green">${text}</span>`;
   if (val < 0) return `<span class="val-red">${text}</span>`;
   return text;
+}
+
+function removeSkeletons() {
+  document.querySelectorAll('.skeleton').forEach(el => {
+    el.classList.remove('skeleton');
+  });
 }
 
 function toggleSymbol(sym) {
@@ -372,6 +373,7 @@ async function loadPortfolio() {
       portfolioData[sym].sells.push(t);
     });
 
+    removeSkeletons();
     renderTable();
     renderTradesTable();
     calculateHistoricalData(holdings, trades);
@@ -602,6 +604,23 @@ function calculateHistoricalData(holdings, trades) {
     if (hasPositions) masterChartData.push({ date: date, value: totalVal, cost: totalCost });
   });
 
+  // Calculate 30-Day Volatility Metric
+  if (masterChartData.length > 30) {
+    let recentData = masterChartData.slice(-30);
+    let returns = [];
+    for (let i = 1; i < recentData.length; i++) {
+      returns.push((recentData[i].value - recentData[i-1].value) / recentData[i-1].value);
+    }
+    let mean = returns.reduce((a,b) => a+b, 0) / returns.length;
+    let variance = returns.reduce((a,b) => a + Math.pow(b - mean, 2), 0) / returns.length;
+    let stdDev = Math.sqrt(variance);
+    // Annualize the volatility (assuming 252 trading days)
+    let annualizedVol = stdDev * Math.sqrt(252) * 100; 
+    document.getElementById('kpi-volatility').textContent = annualizedVol.toFixed(2) + '%';
+  } else {
+    document.getElementById('kpi-volatility').textContent = 'N/A';
+  }
+
   renderMainChart('ALL');
 }
 
@@ -626,44 +645,36 @@ function renderMainChart(period) {
   const usdLine = costData; 
 
   const ctx = document.getElementById('value-chart').getContext('2d');
-  if (valChart) valChart.destroy();
   
-  valChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [
-        {
-          label: 'Total Value ($)',
-          data: valData,
-          borderColor: '#5b8df6',
-          backgroundColor: 'rgba(91,141,246,0.1)',
-          borderWidth: 2, fill: true, pointRadius: 0, pointHoverRadius: 4, tension: 0.2
-        },
-        {
-          label: 'Invested Cost ($)',
-          data: costData,
-          borderColor: '#9aa0bb',
-          borderWidth: 2, borderDash: [5, 5], fill: false, pointRadius: 0, pointHoverRadius: 0, tension: 0.2
-        },
-        {
-          label: 'USD Baseline ($)',
-          data: usdLine,
-          borderColor: '#4caf88',
-          borderWidth: 1.5, fill: false, pointRadius: 0, pointHoverRadius: 0, tension: 0.2
-        }
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { display: true, position: 'top' },
-        tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => ctx.dataset.label + ': ' + fmtMoney(ctx.parsed.y) } }
+  // Performance Optimization: Update existing chart data instead of destroying and recreating
+  if (valChart) {
+    valChart.data.labels = labels;
+    valChart.data.datasets[0].data = valData;
+    valChart.data.datasets[1].data = costData;
+    valChart.data.datasets[2].data = usdLine;
+    valChart.update();
+  } else {
+    valChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'Total Value ($)', data: valData, borderColor: '#5b8df6', backgroundColor: 'rgba(91,141,246,0.1)', borderWidth: 2, fill: true, pointRadius: 0, pointHoverRadius: 4, tension: 0.2 },
+          { label: 'Invested Cost ($)', data: costData, borderColor: '#9aa0bb', borderWidth: 2, borderDash: [5, 5], fill: false, pointRadius: 0, pointHoverRadius: 0, tension: 0.2 },
+          { label: 'USD Baseline ($)', data: usdLine, borderColor: '#4caf88', borderWidth: 1.5, fill: false, pointRadius: 0, pointHoverRadius: 0, tension: 0.2 }
+        ]
       },
-      interaction: { mode: 'index', intersect: false },
-      scales: { y: { ticks: { callback: v => '$' + v } } }
-    }
-  });
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'top' },
+          tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => ctx.dataset.label + ': ' + fmtMoney(ctx.parsed.y) } }
+        },
+        interaction: { mode: 'index', intersect: false },
+        scales: { y: { ticks: { callback: v => '$' + v } } }
+      }
+    });
+  }
 }
 
 document.querySelectorAll('#chart-filters .btn-filter').forEach(btn => {
@@ -683,22 +694,28 @@ function renderAllocationPie() {
   const totalVal = data.reduce((a,b) => a+b, 0);
   
   const bgColors = labels.map((_, i) => palette[i % palette.length]);
-
   const ctx = document.getElementById('allocation-chart').getContext('2d');
-  if (pieChart) pieChart.destroy();
   
-  pieChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: { labels: labels, datasets: [{ data: data, backgroundColor: bgColors, borderWidth: 2, borderColor: 'var(--surface)' }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false }, 
-        tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + fmtMoney(ctx.parsed) + ' (' + ((ctx.parsed/totalVal)*100).toFixed(1) + '%)' } }
-      },
-      cutout: '65%'
-    }
-  });
+  // Performance Optimization: Update existing pie chart data instead of destroying
+  if (pieChart) {
+    pieChart.data.labels = labels;
+    pieChart.data.datasets[0].data = data;
+    pieChart.data.datasets[0].backgroundColor = bgColors;
+    pieChart.update();
+  } else {
+    pieChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels: labels, datasets: [{ data: data, backgroundColor: bgColors, borderWidth: 2, borderColor: 'var(--surface)' }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }, 
+          tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + fmtMoney(ctx.parsed) + ' (' + ((ctx.parsed/totalVal)*100).toFixed(1) + '%)' } }
+        },
+        cutout: '65%'
+      }
+    });
+  }
 
   const legendContainer = document.getElementById('pie-custom-legend');
   legendContainer.innerHTML = '';
@@ -741,7 +758,6 @@ function renderHeatmap(period) {
     return;
   }
   
-  // Sort strictly largest to smallest
   const sortedHoldings = [...currentHoldingsList].sort((a, b) => b.val - a.val);
   const totalPortfolioValue = sortedHoldings.reduce((sum, h) => sum + h.val, 0);
   
@@ -756,7 +772,6 @@ function renderHeatmap(period) {
   }
 
   // --- RECURSIVE SLICE AND DICE TREEMAP ALGORITHM ---
-  // Guarantees all tiles fit perfectly into exactly 100% of the width and height of the container.
   function sliceAndDice(items, x, y, w, h) {
     if (items.length === 0) return [];
     if (items.length === 1) {
@@ -765,32 +780,24 @@ function renderHeatmap(period) {
     }
     
     let total = items.reduce((sum, item) => sum + item.val, 0);
-    if (total === 0) {
-      return items.map(i => { i.rect = {x, y, w:0, h:0}; return i; });
-    }
+    if (total === 0) return items.map(i => { i.rect = {x, y, w:0, h:0}; return i; });
 
     let half = total / 2;
     let sum = 0, split = 0;
     
     for (let i = 0; i < items.length - 1; i++) {
         sum += items[i].val;
-        if (sum >= half) {
-            split = i;
-            break;
-        }
+        if (sum >= half) { split = i; break; }
     }
-    
     if (split === items.length - 1 && items.length > 1) split--;
 
     let leftItems = items.slice(0, split + 1);
     let rightItems = items.slice(split + 1);
     let leftRatio = leftItems.reduce((s, i) => s + i.val, 0) / total;
     
-    // Convert percentage to virtual pixels for aspect ratio calculation (Assuming a 2:1 container width:height)
     let wRatio = w * 2.0; 
     let hRatio = h * 1.0; 
 
-    // Split vertically or horizontally depending on which side is longest
     if (wRatio > hRatio) {
         let leftWidth = w * leftRatio;
         return [
@@ -806,7 +813,6 @@ function renderHeatmap(period) {
     }
   }
 
-  // Run the algorithm to assign {x, y, w, h} as percentages to each holding
   const layoutedHoldings = sliceAndDice(sortedHoldings, 0, 0, 100, 100);
 
   layoutedHoldings.forEach(h => {
@@ -836,17 +842,15 @@ function renderHeatmap(period) {
       bgColor = `rgba(224,92,106,${intensity})`;
     }
 
-    const tooltipBase = `${sym}: ${fmtPct(pctChange)} ${period === 'ALL' ? 'from purchase' : 'over ' + period}`;
-    const tooltipExtra = period === 'ALL' ? ` | Avg Cost: ${fmtMoney(h.avgCost)}` : '';
+    const tooltipBase = `<strong>${sym}</strong>: ${fmtPct(pctChange)} ${period === 'ALL' ? 'from purchase' : 'over ' + period}`;
+    const tooltipExtra = period === 'ALL' ? `<br>Avg Cost: ${fmtMoney(h.avgCost)}` : '';
     const portfolioPct = totalPortfolioValue > 0 ? ((h.val / totalPortfolioValue) * 100).toFixed(1) : 0;
-    
-    // Hide text cleanly if a rectangle gets squeezed too small mathematically
     const hideText = h.rect.w < 10 || h.rect.h < 12;
     
-    // We inject elements purely via absolutely positioned CSS values!
+    // Tippy.js data attribute added here
     container.innerHTML += `
       <div style="position: absolute; left: ${h.rect.x}%; top: ${h.rect.y}%; width: ${h.rect.w}%; height: ${h.rect.h}%; padding: 3px; box-sizing: border-box;">
-        <div class="treemap-tile-inner" style="background: ${bgColor};" title="${tooltipBase}${tooltipExtra}">
+        <div class="treemap-tile-inner" style="background: ${bgColor};" data-tippy-content="${tooltipBase}${tooltipExtra}">
           ${!hideText ? `
             <div class="treemap-sym">${sym}</div>
             <div class="treemap-pct">${fmtPct(pctChange)}</div>
@@ -858,6 +862,9 @@ function renderHeatmap(period) {
       </div>
     `;
   });
+
+  // Initialize Advanced Tooltips
+  tippy('[data-tippy-content]', { allowHTML: true, theme: 'translucent', animation: 'scale' });
 }
 
 document.querySelectorAll('#hm-filters .btn-filter').forEach(btn => {
@@ -889,6 +896,51 @@ function updateModalFields() {
   document.getElementById('price-label').textContent = type === 'BUY' ? 'Purchase Price ($)' : 'Sell Price ($)';
 }
 
+// Strict FIFO Logic for Sell Cost Basis Calculation
+function calculateFIFOCostBasis(sym, sharesToSell) {
+  if (!portfolioData[sym] || !portfolioData[sym].buys.length) return 0;
+  
+  let buys = JSON.parse(JSON.stringify(portfolioData[sym].buys));
+  buys.sort((a, b) => a.purchase_date.localeCompare(b.purchase_date));
+  
+  let alreadySold = 0;
+  if (portfolioData[sym].sells) {
+     alreadySold = portfolioData[sym].sells.reduce((sum, s) => sum + parseFloat(s.shares), 0);
+  }
+  
+  // Deplete buys that were already previously sold
+  for (let b of buys) {
+     let q = parseFloat(b.quantity);
+     if (alreadySold >= q) {
+         alreadySold -= q;
+         b.quantity = 0;
+     } else {
+         b.quantity = q - alreadySold;
+         alreadySold = 0;
+     }
+  }
+  
+  let costSum = 0;
+  let sharesLeft = sharesToSell;
+  
+  // Calculate cost basis strictly out of the oldest remaining active shares
+  for (let b of buys) {
+     let q = parseFloat(b.quantity);
+     if (q <= 0) continue;
+     let p = parseFloat(b.purchase_price);
+     
+     if (sharesLeft >= q) {
+         costSum += (q * p);
+         sharesLeft -= q;
+     } else {
+         costSum += (sharesLeft * p);
+         sharesLeft = 0;
+         break;
+     }
+  }
+  return sharesToSell > 0 ? (costSum / sharesToSell) : 0;
+}
+
 async function handleTradeSubmit(e) {
   e.preventDefault();
   const type = document.getElementById('trade-type').value;
@@ -903,12 +955,8 @@ async function handleTradeSubmit(e) {
   if (type === 'BUY') {
     await FF.post('/api/stocks', { symbol: sym, quantity: shares, purchase_price: price, purchase_date: date });
   } else {
-    let costBasis = price;
-    if (portfolioData[sym] && portfolioData[sym].buys.length > 0) {
-      let totalB = portfolioData[sym].buys.reduce((s,b)=>s+parseFloat(b.quantity),0);
-      let totalC = portfolioData[sym].buys.reduce((s,b)=>s+(parseFloat(b.quantity)*parseFloat(b.purchase_price)),0);
-      if(totalB > 0) costBasis = totalC / totalB;
-    }
+    // Injecting Strict FIFO Calculation
+    let costBasis = calculateFIFOCostBasis(sym, shares);
     await FF.post('/api/stock-trades', { symbol: sym, shares: shares, sell_price: price, cost_basis: costBasis, trade_date: date });
   }
   loadPortfolio();
