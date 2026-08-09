@@ -35,58 +35,52 @@
   }
   .holdings-trades-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
 
-  /* Redesigned Treemap/Heatmap Container & Tiles with STRICT Proportional Sizing */
+  /* TRUE RECTANGULAR TREEMAP CSS */
   .treemap-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    position: relative;
     width: 100%;
-    min-height: 280px;
-    align-content: flex-start;
-    justify-content: flex-start;
+    height: 350px;
+    margin-top: 8px;
+    border-radius: 8px;
+    overflow: hidden;
   }
-  .treemap-tile {
+  .treemap-tile-inner {
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
-    padding: 12px;
+    justify-content: center;
+    align-items: center;
     border-radius: 6px;
     color: #fff;
-    font-family: 'DM Mono', monospace;
-    box-sizing: border-box;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     transition: transform 0.2s, filter 0.2s;
     cursor: default;
     overflow: hidden;
-    /* This prevents flexbox from stretching the boxes! */
-    flex: 0 0 auto; 
+    padding: 4px;
   }
-  .treemap-tile:hover {
-    transform: translateY(-4px);
-    filter: brightness(1.1);
-    z-index: 5;
-    box-shadow: 0 8px 16px rgba(0,0,0,0.25);
-  }
-  .treemap-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    width: 100%;
+  .treemap-tile-inner:hover {
+    filter: brightness(1.15);
+    transform: scale(1.02);
+    z-index: 10;
   }
   .treemap-sym {
     font-weight: 700;
+    font-size: clamp(12px, 1.5vw, 18px);
     font-family: 'DM Sans', sans-serif;
-    letter-spacing: 0.5px;
-    line-height: 1;
+    margin-bottom: 2px;
   }
   .treemap-pct {
+    font-size: clamp(10px, 1vw, 14px);
     font-weight: 600;
-    line-height: 1;
+    font-family: 'DM Mono', monospace;
   }
   .treemap-footer {
-    opacity: 0.95;
+    font-size: clamp(9px, 0.9vw, 12px);
+    opacity: 0.9;
     font-family: 'DM Mono', monospace;
-    line-height: 1;
+    margin-top: 4px;
   }
 
   /* Custom Interactive Legend for Pie Chart */
@@ -160,7 +154,7 @@
     
     <div class="card">
       <div class="toolbar" style="margin-bottom: 12px;">
-        <div class="card-title">Portfolio Treemap (Sized strictly by Market Value)</div>
+        <div class="card-title">Portfolio Treemap (Perfect Rectangular Packing)</div>
         <div class="time-filters" id="hm-filters">
           <button class="btn-filter" data-period="1M">1M</button>
           <button class="btn-filter" data-period="3M">3M</button>
@@ -168,8 +162,9 @@
           <button class="btn-filter" data-period="ALL">From Purchase</button>
         </div>
       </div>
+      <!-- Changed from flex layout to a relative boundary container -->
       <div class="treemap-container" id="heatmap-container">
-        <!-- Dynamically scaled heatmap tiles injected by JS -->
+        <!-- Dynamically scaled absolutely positioned heatmap tiles injected by JS -->
       </div>
     </div>
   </div>
@@ -742,17 +737,14 @@ function renderHeatmap(period) {
   container.innerHTML = '';
 
   if (!currentHoldingsList.length) {
-    container.innerHTML = '<div style="color:var(--text3); font-size:12px; width: 100%;">No holdings to display.</div>';
+    container.innerHTML = '<div style="color:var(--text3); font-size:12px; padding: 10px;">No holdings to display.</div>';
     return;
   }
   
-  // 1. Sort completely largest to smallest
+  // Sort strictly largest to smallest
   const sortedHoldings = [...currentHoldingsList].sort((a, b) => b.val - a.val);
   const totalPortfolioValue = sortedHoldings.reduce((sum, h) => sum + h.val, 0);
   
-  // Find the absolute largest asset value in the portfolio to use as our 100% baseline anchor
-  const maxAssetValue = sortedHoldings[0].val;
-
   const today = new Date();
   let cutoffStr = '';
   if (period !== 'ALL') {
@@ -763,7 +755,61 @@ function renderHeatmap(period) {
     cutoffStr = cutoffDate.toISOString().split('T')[0];
   }
 
-  sortedHoldings.forEach(h => {
+  // --- RECURSIVE SLICE AND DICE TREEMAP ALGORITHM ---
+  // Guarantees all tiles fit perfectly into exactly 100% of the width and height of the container.
+  function sliceAndDice(items, x, y, w, h) {
+    if (items.length === 0) return [];
+    if (items.length === 1) {
+        items[0].rect = { x, y, w, h };
+        return [items[0]];
+    }
+    
+    let total = items.reduce((sum, item) => sum + item.val, 0);
+    if (total === 0) {
+      return items.map(i => { i.rect = {x, y, w:0, h:0}; return i; });
+    }
+
+    let half = total / 2;
+    let sum = 0, split = 0;
+    
+    for (let i = 0; i < items.length - 1; i++) {
+        sum += items[i].val;
+        if (sum >= half) {
+            split = i;
+            break;
+        }
+    }
+    
+    if (split === items.length - 1 && items.length > 1) split--;
+
+    let leftItems = items.slice(0, split + 1);
+    let rightItems = items.slice(split + 1);
+    let leftRatio = leftItems.reduce((s, i) => s + i.val, 0) / total;
+    
+    // Convert percentage to virtual pixels for aspect ratio calculation (Assuming a 2:1 container width:height)
+    let wRatio = w * 2.0; 
+    let hRatio = h * 1.0; 
+
+    // Split vertically or horizontally depending on which side is longest
+    if (wRatio > hRatio) {
+        let leftWidth = w * leftRatio;
+        return [
+            ...sliceAndDice(leftItems, x, y, leftWidth, h),
+            ...sliceAndDice(rightItems, x + leftWidth, y, w - leftWidth, h)
+        ];
+    } else {
+        let topHeight = h * leftRatio;
+        return [
+            ...sliceAndDice(leftItems, x, y, w, topHeight),
+            ...sliceAndDice(rightItems, x, y + topHeight, w, h - topHeight)
+        ];
+    }
+  }
+
+  // Run the algorithm to assign {x, y, w, h} as percentages to each holding
+  const layoutedHoldings = sliceAndDice(sortedHoldings, 0, 0, 100, 100);
+
+  layoutedHoldings.forEach(h => {
     const sym = h.sym;
     const currentPrice = detailsData[sym] ? detailsData[sym].price : 0;
     let startPrice = currentPrice;
@@ -790,33 +836,24 @@ function renderHeatmap(period) {
       bgColor = `rgba(224,92,106,${intensity})`;
     }
 
-    // 2. TRUE PROPORTIONAL SIZING
-    // Calculate the size compared to the single largest asset. 
-    // We use Math.sqrt so the AREA of the box scales linearly with the financial value.
-    const sizeRatio = maxAssetValue > 0 ? Math.sqrt(h.val / maxAssetValue) : 0;
-    
-    // Calculate hard pixel values so the browser absolutely cannot stretch or shrink them
-    const boxWidth = Math.max(90, sizeRatio * 280); // Min 90px wide, Max 280px wide
-    const boxHeight = Math.max(75, sizeRatio * 200); // Min 75px high, Max 200px high
-    
-    // Dynamic font sizing so text scales up inside bigger boxes
-    const symFontSize = Math.max(12, sizeRatio * 22);
-    const pctFontSize = Math.max(10, sizeRatio * 15);
-    const valFontSize = Math.max(9, sizeRatio * 12);
-    
     const tooltipBase = `${sym}: ${fmtPct(pctChange)} ${period === 'ALL' ? 'from purchase' : 'over ' + period}`;
     const tooltipExtra = period === 'ALL' ? ` | Avg Cost: ${fmtMoney(h.avgCost)}` : '';
     const portfolioPct = totalPortfolioValue > 0 ? ((h.val / totalPortfolioValue) * 100).toFixed(1) : 0;
     
-    // Using inline 'width' and 'height' overriding flex completely
+    // Hide text cleanly if a rectangle gets squeezed too small mathematically
+    const hideText = h.rect.w < 10 || h.rect.h < 12;
+    
+    // We inject elements purely via absolutely positioned CSS values!
     container.innerHTML += `
-      <div class="treemap-tile" style="background: ${bgColor}; width: ${boxWidth}px; height: ${boxHeight}px;" title="${tooltipBase}${tooltipExtra}">
-        <div class="treemap-header">
-          <span class="treemap-sym" style="font-size: ${symFontSize}px;">${sym}</span>
-          <span class="treemap-pct" style="font-size: ${pctFontSize}px;">${fmtPct(pctChange)}</span>
-        </div>
-        <div class="treemap-footer" style="font-size: ${valFontSize}px;">
-          ${fmtMoney(h.val)} (${portfolioPct}%)
+      <div style="position: absolute; left: ${h.rect.x}%; top: ${h.rect.y}%; width: ${h.rect.w}%; height: ${h.rect.h}%; padding: 3px; box-sizing: border-box;">
+        <div class="treemap-tile-inner" style="background: ${bgColor};" title="${tooltipBase}${tooltipExtra}">
+          ${!hideText ? `
+            <div class="treemap-sym">${sym}</div>
+            <div class="treemap-pct">${fmtPct(pctChange)}</div>
+            <div class="treemap-footer">${fmtMoney(h.val)} (${portfolioPct}%)</div>
+          ` : `
+            <div class="treemap-sym" style="font-size: 10px;">${sym}</div>
+          `}
         </div>
       </div>
     `;
