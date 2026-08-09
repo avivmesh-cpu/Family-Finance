@@ -5,115 +5,126 @@
 
 {% block content %}
 <style>
-  /* Classic Google Finance Styling */
-  .gf-card {
-    background: #fff;
-    border: 1px solid #ccc;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    padding: 16px;
-    margin-bottom: 24px;
-    border-radius: 4px;
-  }
-  .gf-table {
+  /* Match native app styling using CSS variables */
+  .stock-table {
     width: 100%;
     border-collapse: collapse;
-    font-family: Arial, sans-serif;
+    font-family: 'DM Sans', sans-serif;
     font-size: 13px;
-    color: #222;
+    color: var(--text);
   }
-  .gf-table th {
-    background: #f5f5f5;
-    border-bottom: 1px solid #ccc;
+  .stock-table th {
+    background: var(--bg3);
+    border-bottom: 1px solid var(--border2);
     text-align: right;
-    padding: 8px;
-    font-weight: bold;
-    color: #444;
+    padding: 10px;
+    font-weight: 600;
+    color: var(--text2);
   }
-  .gf-table th:first-child { text-align: left; }
-  .gf-table td {
-    padding: 8px;
-    border-bottom: 1px solid #eaeaea;
+  .stock-table th:first-child { text-align: left; }
+  .stock-table td {
+    padding: 10px;
+    border-bottom: 1px solid var(--border2);
     text-align: right;
   }
-  .gf-table td:first-child { text-align: left; }
+  .stock-table td:first-child { text-align: left; }
   
-  .gf-row-main {
-    background: #fdfdfd;
+  .row-main {
+    background: var(--surface);
     cursor: pointer;
-    font-weight: bold;
+    font-weight: 500;
+    transition: background 0.2s;
   }
-  .gf-row-main:hover { background: #f0f8ff; }
-  .gf-row-buy {
-    background: #fff;
-    color: #555;
-    display: none; /* Hidden by default, toggled via JS */
+  .row-main:hover { background: var(--bg2); }
+  .row-buy {
+    background: var(--bg);
+    color: var(--text2);
+    display: none; 
   }
-  .gf-row-sell {
-    background: #fffafa;
-    color: #777;
+  .row-sell {
+    background: var(--bg);
+    color: var(--text3);
     font-style: italic;
     display: none;
   }
   
-  .gf-green { color: #008800; }
-  .gf-red { color: #cc0000; }
-  .gf-sym { color: #1155cc; text-decoration: underline; cursor: pointer; }
+  .val-green { color: var(--green); }
+  .val-red { color: var(--red); }
+  .sym-link { color: var(--accent); font-weight: 600; cursor: pointer; }
   
-  .stepped-chart-container { height: 320px; }
+  .chart-container { height: 320px; position: relative; }
   
   .toolbar {
     display: flex;
     justify-content: space-between;
     margin-bottom: 16px;
+    align-items: center;
   }
-  .btn-gf {
-    background: #f8f8f8;
-    border: 1px solid #d3d3d3;
-    color: #333;
-    padding: 6px 12px;
-    font-size: 12px;
-    font-weight: bold;
-    border-radius: 2px;
-    cursor: pointer;
+  
+  .time-filters { display: flex; gap: 4px; }
+  .btn-filter {
+    background: var(--bg3); border: 1px solid var(--border2);
+    color: var(--text); padding: 4px 10px; font-size: 11px;
+    border-radius: 4px; cursor: pointer; font-weight: 500;
   }
-  .btn-gf:hover { background: #eee; }
+  .btn-filter.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .btn-filter:hover:not(.active) { background: var(--bg2); }
 </style>
 
 <div class="page-body">
 
-  <div class="gf-card">
-    <div style="font-weight: bold; font-family: Arial; font-size: 16px; margin-bottom: 12px;">Cumulative Invested Capital</div>
-    <div class="stepped-chart-container">
-      <canvas id="invested-chart"></canvas>
+  <div class="card mb-24">
+    <div class="toolbar">
+      <div>
+        <div class="card-title">Change in Value (PnL)</div>
+        <div class="card-subtitle">Historical portfolio profit/loss over time</div>
+      </div>
+      <div class="time-filters" id="chart-filters">
+        <button class="btn-filter" data-period="1M">1M</button>
+        <button class="btn-filter" data-period="3M">3M</button>
+        <button class="btn-filter" data-period="6M">6M</button>
+        <button class="btn-filter" data-period="YTD">YTD</button>
+        <button class="btn-filter" data-period="1Y">1Y</button>
+        <button class="btn-filter active" data-period="ALL">ALL</button>
+      </div>
+    </div>
+    <div class="chart-container">
+      <canvas id="pnl-chart"></canvas>
     </div>
   </div>
 
-  <div class="gf-card">
+  <div class="card">
     <div class="toolbar">
-      <div style="font-weight: bold; font-family: Arial; font-size: 16px;">Holdings & Transactions</div>
+      <div>
+        <div class="card-title">Holdings & Transactions</div>
+        <div class="card-subtitle">Click a ticker to view individual buy and sell lots</div>
+      </div>
       <div style="display:flex; gap: 8px;">
-        <button class="btn-gf" onclick="expandAll()">Expand All</button>
-        <button class="btn-gf" onclick="collapseAll()">Collapse All</button>
-        <button class="btn-gf" onclick="promptAddTransaction()">+ Add Transaction</button>
+        <button class="btn btn-ghost btn-sm" onclick="expandAll()">Expand All</button>
+        <button class="btn btn-ghost btn-sm" onclick="collapseAll()">Collapse All</button>
+        <button class="btn btn-primary btn-sm" onclick="promptAddTransaction()">+ Add Transaction</button>
       </div>
     </div>
 
-    <table class="gf-table">
-      <thead>
-        <tr>
-          <th>Symbol / Date</th>
-          <th>Shares</th>
-          <th>Cost/Price</th>
-          <th>Current Price</th>
-          <th>Day Change</th>
-          <th>Total Change</th>
-          <th>Market Value</th>
-        </tr>
-      </thead>
-      <tbody id="portfolio-body">
-        <tr><td colspan="7" style="text-align:center;">Loading data...</td></tr>
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="stock-table">
+        <thead>
+          <tr>
+            <th>Symbol / Date</th>
+            <th>Shares</th>
+            <th>Cost/Price</th>
+            <th>Current Price</th>
+            <th>Day Change</th>
+            <th>Total Change</th>
+            <th>Market Value</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+        <tbody id="portfolio-body">
+          <tr><td colspan="8" style="text-align:center; padding: 20px;">Loading market data...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -124,9 +135,9 @@
 <script>
 let portfolioData = {};
 let detailsData = {};
-let stepChart = null;
+let pnlChart = null;
+let masterPnLData = []; // Array of {date, pnl}
 
-// Formatters
 const fmtNum = (n) => new Intl.NumberFormat('en-US').format(n);
 const fmtMoney = (n) => '$' + n.toFixed(2);
 const fmtPct = (n) => (n > 0 ? '+' : '') + n.toFixed(2) + '%';
@@ -139,8 +150,8 @@ const fmtCap = (n) => {
 };
 
 function formatColor(val, text) {
-  if (val > 0) return `<span class="gf-green">${text}</span>`;
-  if (val < 0) return `<span class="gf-red">${text}</span>`;
+  if (val > 0) return `<span class="val-green">${text}</span>`;
+  if (val < 0) return `<span class="val-red">${text}</span>`;
   return text;
 }
 
@@ -152,36 +163,30 @@ function toggleSymbol(sym) {
 }
 
 function expandAll() {
-  document.querySelectorAll('.gf-row-buy, .gf-row-sell').forEach(r => r.style.display = 'table-row');
+  document.querySelectorAll('.row-buy, .row-sell').forEach(r => r.style.display = 'table-row');
 }
 
 function collapseAll() {
-  document.querySelectorAll('.gf-row-buy, .gf-row-sell').forEach(r => r.style.display = 'none');
+  document.querySelectorAll('.row-buy, .row-sell').forEach(r => r.style.display = 'none');
 }
 
 async function loadPortfolio() {
   try {
-    const [holdings, trades, details] = await Promise.all([
+    const [holdings, trades, details, history] = await Promise.all([
       FF.get('/api/stocks'),
       FF.get('/api/stock-trades'),
-      FF.get('/api/stocks/details')
+      FF.get('/api/stocks/details'),
+      FF.get('/api/stocks/history')
     ]);
     
     detailsData = details;
     portfolioData = {};
-    const buysForChart = [];
-
+    
     // Group Buys
     holdings.forEach(h => {
       const sym = h.symbol;
       if (!portfolioData[sym]) portfolioData[sym] = { buys: [], sells: [] };
       portfolioData[sym].buys.push(h);
-      if(h.purchase_date) {
-        buysForChart.push({
-          date: h.purchase_date,
-          amount: parseFloat(h.quantity) * parseFloat(h.purchase_price)
-        });
-      }
     });
 
     // Group Sells
@@ -192,10 +197,10 @@ async function loadPortfolio() {
     });
 
     renderTable();
-    renderChart(buysForChart);
+    calculateHistoricalPnL(holdings, trades, history.series);
     
   } catch (err) {
-    document.getElementById('portfolio-body').innerHTML = `<tr><td colspan="7" class="gf-red">Error loading data: ${err}</td></tr>`;
+    document.getElementById('portfolio-body').innerHTML = `<tr><td colspan="8" class="val-red">Error loading data: ${err}</td></tr>`;
   }
 }
 
@@ -207,7 +212,6 @@ function renderTable() {
   let grandTotalCost = 0;
   let grandDayChange = 0;
 
-  // Render alphabetically
   Object.keys(portfolioData).sort().forEach(sym => {
     const data = portfolioData[sym];
     const mkt = detailsData[sym] || { price: 0, prev: 0, mktcap: 0 };
@@ -226,7 +230,6 @@ function renderTable() {
     });
 
     const currentShares = totalBuyShares - totalSellShares;
-    // Prevent division by zero
     const avgCost = currentShares > 0 ? (totalCostBasis / totalBuyShares) : 0; 
     
     const marketValue = currentShares * mkt.price;
@@ -243,17 +246,18 @@ function renderTable() {
 
     // --- Master Row ---
     let html = `
-      <tr class="gf-row-main" onclick="toggleSymbol('${sym}')">
+      <tr class="row-main" onclick="toggleSymbol('${sym}')">
         <td>
-          <span class="gf-sym">${sym}</span>
-          <div style="font-size:10px; font-weight:normal; color:#888;">Cap: ${fmtCap(mkt.mktcap)}</div>
+          <span class="sym-link">${sym}</span>
+          <div style="font-size:10px; font-weight:normal; color:var(--text3);">Cap: ${fmtCap(mkt.mktcap)}</div>
         </td>
-        <td>${fmtNum(currentShares)}</td>
-        <td>${fmtMoney(avgCost)}</td>
-        <td>${fmtMoney(mkt.price)}</td>
-        <td>${formatColor(dayChangeVal, fmtMoney(Math.abs(dayChangeVal)) + ' (' + fmtPct(dayChangePct) + ')')}</td>
-        <td>${formatColor(totalChangeVal, fmtMoney(Math.abs(totalChangeVal)) + ' (' + fmtPct(totalChangePct) + ')')}</td>
-        <td>${fmtMoney(marketValue)}</td>
+        <td style="font-family:'DM Mono',monospace">${fmtNum(currentShares)}</td>
+        <td style="font-family:'DM Mono',monospace">${fmtMoney(avgCost)}</td>
+        <td style="font-family:'DM Mono',monospace">${fmtMoney(mkt.price)}</td>
+        <td style="font-family:'DM Mono',monospace">${formatColor(dayChangeVal, fmtMoney(Math.abs(dayChangeVal)) + ' (' + fmtPct(dayChangePct) + ')')}</td>
+        <td style="font-family:'DM Mono',monospace">${formatColor(totalChangeVal, fmtMoney(Math.abs(totalChangeVal)) + ' (' + fmtPct(totalChangePct) + ')')}</td>
+        <td style="font-family:'DM Mono',monospace; font-weight:600">${fmtMoney(marketValue)}</td>
+        <td></td>
       </tr>
     `;
 
@@ -267,14 +271,15 @@ function renderTable() {
       const bTotChangePct = bPrice > 0 ? (bTotChange / bCost) * 100 : 0;
       
       html += `
-        <tr class="gf-row-buy child-of-${sym}">
+        <tr class="row-buy child-of-${sym}">
           <td style="padding-left: 24px;">Buy: ${b.purchase_date || 'N/A'}</td>
-          <td>${fmtNum(bShares)}</td>
-          <td>${fmtMoney(bPrice)}</td>
+          <td style="font-family:'DM Mono',monospace">${fmtNum(bShares)}</td>
+          <td style="font-family:'DM Mono',monospace">${fmtMoney(bPrice)}</td>
           <td>--</td>
           <td>--</td>
-          <td>${formatColor(bTotChange, fmtMoney(Math.abs(bTotChange)) + ' (' + fmtPct(bTotChangePct) + ')')}</td>
-          <td>${fmtMoney(bVal)}</td>
+          <td style="font-family:'DM Mono',monospace">${formatColor(bTotChange, fmtMoney(Math.abs(bTotChange)) + ' (' + fmtPct(bTotChangePct) + ')')}</td>
+          <td style="font-family:'DM Mono',monospace">${fmtMoney(bVal)}</td>
+          <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteBuy(${b.id})" title="Delete Buy">✕</button></td>
         </tr>
       `;
     });
@@ -287,14 +292,15 @@ function renderTable() {
       const realized = (sPrice - sCost) * sShares;
       
       html += `
-        <tr class="gf-row-sell child-of-${sym}">
+        <tr class="row-sell child-of-${sym}">
           <td style="padding-left: 24px;">Sell: ${s.trade_date || 'N/A'}</td>
-          <td>-${fmtNum(sShares)}</td>
-          <td>${fmtMoney(sPrice)}</td>
+          <td style="font-family:'DM Mono',monospace">-${fmtNum(sShares)}</td>
+          <td style="font-family:'DM Mono',monospace">${fmtMoney(sPrice)}</td>
           <td>--</td>
           <td>--</td>
-          <td>Realized: ${formatColor(realized, fmtMoney(Math.abs(realized)))}</td>
+          <td style="font-family:'DM Mono',monospace">Realized: ${formatColor(realized, fmtMoney(Math.abs(realized)))}</td>
           <td>--</td>
+          <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteSell(${s.id})" title="Delete Sell">✕</button></td>
         </tr>
       `;
     });
@@ -307,66 +313,150 @@ function renderTable() {
   const grandTotalPct = grandTotalCost > 0 ? (grandTotalChange / grandTotalCost) * 100 : 0;
   
   tbody.innerHTML += `
-    <tr style="background:#f5f5f5; font-weight:bold;">
-      <td>Total</td>
+    <tr style="background:var(--bg3); font-weight:600; border-top: 2px solid var(--border2);">
+      <td>Total Portfolio</td>
       <td></td>
       <td></td>
       <td></td>
-      <td>${formatColor(grandDayChange, fmtMoney(Math.abs(grandDayChange)))}</td>
-      <td>${formatColor(grandTotalChange, fmtMoney(Math.abs(grandTotalChange)) + ' (' + fmtPct(grandTotalPct) + ')')}</td>
-      <td>${fmtMoney(grandTotalValue)}</td>
+      <td style="font-family:'DM Mono',monospace">${formatColor(grandDayChange, fmtMoney(Math.abs(grandDayChange)))}</td>
+      <td style="font-family:'DM Mono',monospace">${formatColor(grandTotalChange, fmtMoney(Math.abs(grandTotalChange)) + ' (' + fmtPct(grandTotalPct) + ')')}</td>
+      <td style="font-family:'DM Mono',monospace; color:var(--accent)">${fmtMoney(grandTotalValue)}</td>
+      <td></td>
     </tr>
   `;
 }
 
-function renderChart(buysForChart) {
-  // Sort buys chronologically
-  buysForChart.sort((a, b) => a.date.localeCompare(b.date));
+function calculateHistoricalPnL(holdings, trades, historySeries) {
+  // Combine all dates from history series
+  const dateSet = new Set();
+  Object.values(historySeries || {}).forEach(prices => {
+    Object.keys(prices).forEach(d => dateSet.add(d));
+  });
   
-  const labels = [];
-  const dataPoints = [];
-  let cumulative = 0;
+  // Add today's date with current details prices to ensure latest data is plotted
+  const todayStr = new Date().toISOString().split('T')[0];
+  dateSet.add(todayStr);
   
-  buysForChart.forEach(b => {
-    cumulative += b.amount;
-    labels.push(b.date);
-    dataPoints.push(cumulative);
+  const sortedDates = Array.from(dateSet).sort();
+  
+  // Build chronological events
+  let events = [];
+  holdings.forEach(h => {
+    if(h.purchase_date) events.push({type: 'buy', date: h.purchase_date, sym: h.symbol, qty: +h.quantity, price: +h.purchase_price});
+  });
+  trades.forEach(t => {
+    if(t.trade_date) events.push({type: 'sell', date: t.trade_date, sym: t.symbol, qty: +t.shares, cost: +t.cost_basis});
+  });
+  events.sort((a,b) => a.date.localeCompare(b.date));
+
+  let pos = {}; // { AAPL: { qty: 0, cost: 0 } }
+  let lastKnownPrice = {};
+  let eIdx = 0;
+  masterPnLData = [];
+
+  sortedDates.forEach(date => {
+    // Process events up to this date
+    while(eIdx < events.length && events[eIdx].date <= date) {
+      let ev = events[eIdx];
+      if(!pos[ev.sym]) pos[ev.sym] = {qty: 0, cost: 0};
+      
+      if(ev.type === 'buy') {
+        pos[ev.sym].qty += ev.qty;
+        pos[ev.sym].cost += (ev.qty * ev.price);
+      } else if(ev.type === 'sell') {
+        pos[ev.sym].qty -= ev.qty;
+        pos[ev.sym].cost -= (ev.qty * ev.cost);
+      }
+      eIdx++;
+    }
+
+    let totalVal = 0;
+    let totalCost = 0;
+    let hasPositions = false;
+    
+    for(let sym in pos) {
+      if(pos[sym].qty > 0) {
+        hasPositions = true;
+        let p = (date === todayStr && detailsData[sym]) ? detailsData[sym].price : (historySeries[sym]?.[date] || lastKnownPrice[sym] || 0);
+        if(p > 0) lastKnownPrice[sym] = p; 
+        
+        totalVal += (pos[sym].qty * lastKnownPrice[sym]);
+        totalCost += pos[sym].cost;
+      }
+    }
+    
+    if (hasPositions) {
+      masterPnLData.push({ date: date, pnl: totalVal - totalCost });
+    }
   });
 
-  const ctx = document.getElementById('invested-chart').getContext('2d');
-  if (stepChart) stepChart.destroy();
+  renderChart('ALL'); // Default to ALL
+}
+
+function renderChart(period) {
+  if (!masterPnLData.length) return;
+
+  const today = new Date();
+  let cutoffDate = new Date('1970-01-01');
   
-  stepChart = new Chart(ctx, {
+  if (period === '1M') cutoffDate = new Date(today.setMonth(today.getMonth() - 1));
+  else if (period === '3M') cutoffDate = new Date(today.setMonth(today.getMonth() - 3));
+  else if (period === '6M') cutoffDate = new Date(today.setMonth(today.getMonth() - 6));
+  else if (period === 'YTD') cutoffDate = new Date(today.getFullYear(), 0, 1);
+  else if (period === '1Y') cutoffDate = new Date(today.setFullYear(today.getFullYear() - 1));
+  
+  const cutoffStr = cutoffDate.toISOString().split('T')[0];
+  const filteredData = masterPnLData.filter(d => d.date >= cutoffStr);
+  
+  const labels = filteredData.map(d => d.date);
+  const dataPoints = filteredData.map(d => d.pnl);
+
+  const ctx = document.getElementById('pnl-chart').getContext('2d');
+  if (pnlChart) pnlChart.destroy();
+  
+  pnlChart = new Chart(ctx, {
     type: 'line',
     data: {
       labels: labels,
       datasets: [{
-        label: 'Total Capital Invested ($)',
+        label: 'Change in Value ($)',
         data: dataPoints,
-        stepped: true, // Enables the step graph requested
-        borderColor: '#1155cc',
-        backgroundColor: 'rgba(17, 85, 204, 0.1)',
+        borderColor: 'rgba(76,175,136,1)', // Matches var(--green)
+        backgroundColor: 'rgba(76,175,136,0.1)',
         borderWidth: 2,
         fill: true,
-        pointRadius: 3,
-        pointHoverRadius: 5
+        pointRadius: 0, // hide points for cleaner look over time
+        pointHoverRadius: 4,
+        tension: 0.2
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { display: true, position: 'top' },
+        legend: { display: false },
         tooltip: {
-          callbacks: { label: ctx => 'Invested: ' + fmtMoney(ctx.parsed.y) }
+          mode: 'index',
+          intersect: false,
+          callbacks: { label: ctx => 'PnL: ' + fmtMoney(ctx.parsed.y) }
         }
       },
+      interaction: { mode: 'index', intersect: false },
       scales: {
         y: { ticks: { callback: v => '$' + v } }
       }
     }
   });
 }
+
+// Filter button logic
+document.querySelectorAll('.btn-filter').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    document.querySelectorAll('.btn-filter').forEach(b => b.classList.remove('active'));
+    e.target.classList.add('active');
+    renderChart(e.target.dataset.period);
+  });
+});
 
 function promptAddTransaction() {
   const isBuy = confirm("Press OK to add a BUY transaction, or Cancel for a SELL.");
@@ -392,6 +482,20 @@ function promptAddTransaction() {
       FF.post('/api/stock-trades', { symbol: sym, shares: qty, sell_price: price, trade_date: date })
         .then(() => loadPortfolio());
     }
+  }
+}
+
+async function deleteBuy(id) {
+  if (confirm("Delete this purchase lot? This cannot be undone.")) {
+    await FF.del(`/api/stocks/${id}`);
+    loadPortfolio();
+  }
+}
+
+async function deleteSell(id) {
+  if (confirm("Delete this sell transaction? This cannot be undone.")) {
+    await FF.del(`/api/stock-trades/${id}`);
+    loadPortfolio();
   }
 }
 
