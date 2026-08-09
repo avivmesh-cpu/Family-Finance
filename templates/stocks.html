@@ -35,13 +35,21 @@
   }
   .holdings-trades-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
 
-  /* Heatmap Styles - Proportional Sizing via Flex/Width calculation */
+  /* Heatmap Styles - Proportional Sizing sorted largest to smallest */
   .heatmap-flex { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; min-height: 200px; }
   .hm-block { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px 8px; border-radius: 6px; color: #fff; font-family: 'DM Mono', monospace; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1); transition: transform 0.2s; min-height: 90px; flex-grow: 1; cursor: default; overflow: hidden; }
   .hm-block:hover { transform: scale(1.02); z-index: 10; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
   .hm-sym { font-weight: 700; font-size: 15px; font-family: 'DM Sans', sans-serif; }
   .hm-pct { font-size: 12px; margin-top: 4px; }
   .hm-val { font-size: 10px; opacity: 0.85; margin-top: 2px; }
+
+  /* Custom Interactive Legend for Pie Chart */
+  .pie-legend-container { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; padding-right: 4px; }
+  .pie-legend-item { display: flex; align-items: center; justify-content: space-between; font-size: 12px; padding: 4px 8px; border-radius: 4px; background: var(--bg3); cursor: pointer; transition: background 0.15s; }
+  .pie-legend-item:hover { background: var(--bg2); }
+  .pie-legend-left { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .pie-legend-color { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .pie-legend-right { font-family: 'DM Mono', monospace; color: var(--text2); }
 
   /* Trades Table Styles */
   .trades-table { width: 100%; border-collapse: collapse; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); }
@@ -94,14 +102,19 @@
   <div class="grid-2 mb-24" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
     <div class="card">
       <div class="card-title mb-16">Asset Allocation</div>
-      <div style="height: 240px; position: relative;">
-        <canvas id="allocation-chart"></canvas>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: center;">
+        <div style="height: 220px; position: relative;">
+          <canvas id="allocation-chart"></canvas>
+        </div>
+        <div class="pie-legend-container" id="pie-custom-legend">
+          <!-- Interactive legend injected by JS -->
+        </div>
       </div>
     </div>
     
     <div class="card">
       <div class="toolbar" style="margin-bottom: 12px;">
-        <div class="card-title">Proportional Heatmap (Size = Asset Value)</div>
+        <div class="card-title">Proportional Heatmap (Largest to Smallest)</div>
         <div class="time-filters" id="hm-filters">
           <button class="btn-filter" data-period="1M">1M</button>
           <button class="btn-filter" data-period="3M">3M</button>
@@ -270,6 +283,7 @@ let masterChartData = [];
 let currentHoldingsList = []; 
 let currentSortKey = 'val';
 let sortDirectionDesc = true;
+const palette = ['#5b8df6','#4caf88','#c9a84c','#e05c6a','#9b7cf8','#4cc9c9','#f08c4b','#e87dbd','#7dc8e8','#a8d86e'];
 
 const fmtNum = (n) => new Intl.NumberFormat('en-US').format(n);
 const fmtMoney = (n) => '$' + n.toFixed(2);
@@ -360,7 +374,6 @@ function renderTable() {
 
     const currentShares = totalBuyShares - totalSellShares;
     
-    // Automatically hide/disappear if shares are 0 or less
     if (currentShares <= 0) return;
 
     const avgCost = totalCostBasis / totalBuyShares; 
@@ -383,7 +396,6 @@ function renderTable() {
     });
   });
 
-  // Sort holdings based on user selection
   currentHoldingsList.sort((a, b) => {
     let valA = a[currentSortKey];
     let valB = b[currentSortKey];
@@ -402,7 +414,6 @@ function renderTable() {
     const totalChangeVal = item.changeVal;
     const totalChangePct = avgCost > 0 ? (totalChangeVal / (currentShares * avgCost)) * 100 : 0;
 
-    // --- Master Row ---
     let html = `
       <tr class="row-main" onclick="toggleSymbol('${sym}')">
         <td><span class="sym-link">${sym}</span></td>
@@ -415,7 +426,6 @@ function renderTable() {
       </tr>
     `;
 
-    // --- Buy Lots ---
     item.buys.sort((a,b) => (a.purchase_date || '').localeCompare(b.purchase_date || '')).forEach(b => {
       const bShares = parseFloat(b.quantity); const bPrice = parseFloat(b.purchase_price);
       const bCost = bShares * bPrice; const bVal = bShares * mktPrice;
@@ -437,7 +447,6 @@ function renderTable() {
       `;
     });
 
-    // --- Sell Lots ---
     item.sells.sort((a,b) => (a.trade_date || '').localeCompare(b.trade_date || '')).forEach(s => {
       const sShares = parseFloat(s.shares); const sPrice = parseFloat(s.sell_price);
       const sCost = parseFloat(s.cost_basis); const realized = (sPrice - sCost) * sShares;
@@ -460,7 +469,6 @@ function renderTable() {
   const grandTotalChange = grandTotalValue - grandTotalCost;
   const grandTotalPct = grandTotalCost > 0 ? (grandTotalChange / grandTotalCost) * 100 : 0;
   
-  // Calculate total money made from finished/realized trades
   let totalRealizedPnL = 0;
   rawTrades.forEach(t => {
     const sShares = parseFloat(t.shares);
@@ -630,8 +638,8 @@ function renderAllocationPie() {
   const sorted = [...currentHoldingsList].sort((a,b) => b.val - a.val);
   const labels = sorted.map(h => h.sym);
   const data = sorted.map(h => h.val);
+  const totalVal = data.reduce((a,b) => a+b, 0);
   
-  const palette = ['#5b8df6','#4caf88','#c9a84c','#e05c6a','#9b7cf8','#4cc9c9','#f08c4b','#e87dbd','#7dc8e8','#a8d86e'];
   const bgColors = labels.map((_, i) => palette[i % palette.length]);
 
   const ctx = document.getElementById('allocation-chart').getContext('2d');
@@ -643,12 +651,43 @@ function renderAllocationPie() {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'right', labels: { color: 'var(--text2)', font: { size: 11 }, boxWidth: 12 } },
-        tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + fmtMoney(ctx.parsed) } }
+        legend: { display: false }, // Using custom interactive HTML legend below
+        tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + fmtMoney(ctx.parsed) + ' (' + ((ctx.parsed/totalVal)*100).toFixed(1) + '%)' } }
       },
       cutout: '65%'
     }
   });
+
+  // Render Custom Interactive Legend
+  const legendContainer = document.getElementById('pie-custom-legend');
+  legendContainer.innerHTML = '';
+  
+  sorted.forEach((item, index) => {
+    const color = bgColors[index % bgColors.length];
+    const pct = totalVal > 0 ? ((item.val / totalVal) * 100).toFixed(1) : 0;
+    
+    legendContainer.innerHTML += `
+      <div class="pie-legend-item" onmouseenter="highlightPieSlice(${index})" onmouseleave="resetPieSlice()">
+        <div class="pie-legend-left">
+          <span class="pie-legend-color" style="background: ${color};"></span>
+          <span>${item.sym}</span>
+        </div>
+        <div class="pie-legend-right">${fmtMoney(item.val)} (${pct}%)</div>
+      </div>
+    `;
+  });
+}
+
+function highlightPieSlice(index) {
+  if (!pieChart) return;
+  pieChart.setActiveElements([{ datasetIndex: 0, index: index }]);
+  pieChart.update();
+}
+
+function resetPieSlice() {
+  if (!pieChart) return;
+  pieChart.setActiveElements([]);
+  pieChart.update();
 }
 
 function renderHeatmap(period) {
@@ -660,7 +699,9 @@ function renderHeatmap(period) {
     return;
   }
   
-  const totalPortfolioValue = currentHoldingsList.reduce((sum, h) => sum + h.val, 0);
+  // Sort holdings from largest to smallest by Total Market Value
+  const sortedHoldings = [...currentHoldingsList].sort((a, b) => b.val - a.val);
+  const totalPortfolioValue = sortedHoldings.reduce((sum, h) => sum + h.val, 0);
   const today = new Date();
   
   let cutoffStr = '';
@@ -672,7 +713,7 @@ function renderHeatmap(period) {
     cutoffStr = cutoffDate.toISOString().split('T')[0];
   }
 
-  currentHoldingsList.forEach(h => {
+  sortedHoldings.forEach(h => {
     const sym = h.sym;
     const currentPrice = detailsData[sym] ? detailsData[sym].price : 0;
     let startPrice = currentPrice;
@@ -699,7 +740,7 @@ function renderHeatmap(period) {
       bgColor = `rgba(224,92,106,${intensity})`;
     }
 
-    // Proportional width based strictly on Total Asset value percentage
+    // Proportional width sized strictly by total portfolio asset value share
     const weight = h.val / totalPortfolioValue;
     const widthPct = Math.max(14, weight * 100); 
 
@@ -759,7 +800,6 @@ async function handleTradeSubmit(e) {
   if (type === 'BUY') {
     await FF.post('/api/stocks', { symbol: sym, quantity: shares, purchase_price: price, purchase_date: date });
   } else {
-    // Find matching cost basis from existing holdings if possible
     let costBasis = price;
     if (portfolioData[sym] && portfolioData[sym].buys.length > 0) {
       let totalB = portfolioData[sym].buys.reduce((s,b)=>s+parseFloat(b.quantity),0);
