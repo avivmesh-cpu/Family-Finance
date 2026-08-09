@@ -5,7 +5,7 @@
 
 {% block content %}
 <style>
-  /* Match native app styling using CSS variables */
+  /* Match native app styling using CSS variables & Responsive Layout */
   .stock-table { width: 100%; border-collapse: collapse; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); }
   .stock-table th { background: var(--bg3); border-bottom: 1px solid var(--border2); text-align: right; padding: 10px; font-weight: 600; color: var(--text2); cursor: pointer; user-select: none; }
   .stock-table th:first-child { text-align: left; }
@@ -22,18 +22,26 @@
   .val-red { color: var(--red); }
   .sym-link { color: var(--accent); font-weight: 600; cursor: pointer; }
   
-  .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; }
-  .time-filters { display: flex; gap: 4px; }
+  .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .time-filters { display: flex; gap: 4px; flex-wrap: wrap; }
   .btn-filter { background: var(--bg3); border: 1px solid var(--border2); color: var(--text); padding: 4px 10px; font-size: 11px; border-radius: 4px; cursor: pointer; font-weight: 500; }
   .btn-filter.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .btn-filter:hover:not(.active) { background: var(--bg2); }
 
-  /* Heatmap Styles */
-  .heatmap-flex { display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; }
-  .hm-block { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px 4px; border-radius: 4px; color: #fff; font-family: 'DM Mono', monospace; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1); transition: transform 0.2s; min-height: 80px; flex-grow: 1; cursor: default; }
-  .hm-block:hover { transform: scale(1.02); z-index: 10; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-  .hm-sym { font-weight: 600; font-size: 14px; font-family: 'DM Sans', sans-serif; }
-  .hm-pct { font-size: 11px; margin-top: 4px; }
+  /* Responsive Grid Adjustments for Laptop & iPad */
+  @media (max-width: 1024px) {
+    .grid-2 { grid-template-columns: 1fr !important; }
+    .holdings-trades-grid { grid-template-columns: 1fr !important; }
+  }
+  .holdings-trades-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+
+  /* Heatmap Styles - Proportional Sizing via Flex/Width calculation */
+  .heatmap-flex { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; min-height: 200px; }
+  .hm-block { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px 8px; border-radius: 6px; color: #fff; font-family: 'DM Mono', monospace; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1); transition: transform 0.2s; min-height: 90px; flex-grow: 1; cursor: default; overflow: hidden; }
+  .hm-block:hover { transform: scale(1.02); z-index: 10; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  .hm-sym { font-weight: 700; font-size: 15px; font-family: 'DM Sans', sans-serif; }
+  .hm-pct { font-size: 12px; margin-top: 4px; }
+  .hm-val { font-size: 10px; opacity: 0.85; margin-top: 2px; }
 
   /* Trades Table Styles */
   .trades-table { width: 100%; border-collapse: collapse; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); }
@@ -42,7 +50,7 @@
   .trade-badge-buy { background: rgba(76,175,136,0.15); color: var(--green); padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
   .trade-badge-sell { background: rgba(224,92,106,0.15); color: var(--red); padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
 
-  /* Interactive Buy/Sell Modal / Quick Actions */
+  /* Modal Styles */
   .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 1000; }
   .modal-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
   .modal-header { font-size: 18px; font-weight: 600; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
@@ -58,6 +66,7 @@
     <div class="kpi-card"><div class="kpi-label">Total Investment (Cost)</div><div class="kpi-value" id="kpi-cost">—</div></div>
     <div class="kpi-card blue"><div class="kpi-label">Total Market Value</div><div class="kpi-value blue" id="kpi-value">—</div></div>
     <div class="kpi-card"><div class="kpi-label">All-Time Return</div><div class="kpi-value" id="kpi-return">—</div></div>
+    <div class="kpi-card green"><div class="kpi-label">Realized Trade Profits</div><div class="kpi-value green" id="kpi-realized">—</div></div>
   </div>
 
   <!-- Main Chart -->
@@ -82,7 +91,7 @@
   </div>
 
   <!-- Pie Chart & Heatmap Row -->
-  <div class="grid-2 mb-24">
+  <div class="grid-2 mb-24" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
     <div class="card">
       <div class="card-title mb-16">Asset Allocation</div>
       <div style="height: 240px; position: relative;">
@@ -92,7 +101,7 @@
     
     <div class="card">
       <div class="toolbar" style="margin-bottom: 12px;">
-        <div class="card-title">Weighted Performance Heatmap</div>
+        <div class="card-title">Proportional Heatmap (Size = Asset Value)</div>
         <div class="time-filters" id="hm-filters">
           <button class="btn-filter" data-period="1M">1M</button>
           <button class="btn-filter" data-period="3M">3M</button>
@@ -106,68 +115,71 @@
     </div>
   </div>
 
-  <!-- Holdings Table -->
-  <div class="card mb-24">
-    <div class="toolbar">
-      <div>
-        <div class="card-title">Holdings</div>
-        <div class="card-subtitle">Click headers to sort table columns</div>
+  <!-- Holdings & Trades Row -->
+  <div class="holdings-trades-grid">
+    
+    <!-- Table -->
+    <div class="card">
+      <div class="toolbar">
+        <div>
+          <div class="card-title">Holdings</div>
+          <div class="card-subtitle">Click headers to sort table columns</div>
+        </div>
+        <div style="display:flex; gap: 8px;">
+          <button class="btn btn-ghost btn-sm" onclick="expandAll()">Expand</button>
+          <button class="btn btn-ghost btn-sm" onclick="collapseAll()">Collapse</button>
+          <button class="btn btn-primary btn-sm" onclick="openTradeModal('BUY')">+ Trade</button>
+        </div>
       </div>
-      <div style="display:flex; gap: 8px;">
-        <button class="btn btn-ghost btn-sm" onclick="expandAll()">Expand</button>
-        <button class="btn btn-ghost btn-sm" onclick="collapseAll()">Collapse</button>
-        <button class="btn btn-primary btn-sm" onclick="openTradeModal('BUY')">+ Trade (Buy/Sell)</button>
+
+      <div class="table-wrap">
+        <table class="stock-table">
+          <thead>
+            <tr>
+              <th onclick="sortHoldings('sym')">Symbol / Date ↕</th>
+              <th onclick="sortHoldings('currentShares')">Shares ↕</th>
+              <th onclick="sortHoldings('avgCost')">Avg Cost ↕</th>
+              <th onclick="sortHoldings('price')">Price ↕</th>
+              <th onclick="sortHoldings('changeVal')">Total Change ↕</th>
+              <th onclick="sortHoldings('val')">Market Value ↕</th>
+              <th style="width:80px">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="portfolio-body">
+            <tr><td colspan="7" style="text-align:center; padding: 20px;">Loading market data...</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
-    <div class="table-wrap">
-      <table class="stock-table">
-        <thead>
-          <tr>
-            <th onclick="sortHoldings('sym')">Symbol / Date ↕</th>
-            <th onclick="sortHoldings('shares')">Shares ↕</th>
-            <th onclick="sortHoldings('avgCost')">Avg Cost ↕</th>
-            <th onclick="sortHoldings('price')">Price ↕</th>
-            <th onclick="sortHoldings('change')">Total Change ↕</th>
-            <th onclick="sortHoldings('val')">Market Value ↕</th>
-            <th style="width:70px">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="portfolio-body">
-          <tr><td colspan="7" style="text-align:center; padding: 20px;">Loading market data...</td></tr>
-        </tbody>
-      </table>
+    <!-- Trades Dashboard Column -->
+    <div class="card">
+      <div class="toolbar">
+        <div>
+          <div class="card-title">Trade Dashboard</div>
+          <div class="card-subtitle">Execution logs</div>
+        </div>
+      </div>
+      <div class="table-wrap" style="max-height: 420px; overflow-y: auto;">
+        <table class="trades-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Sym</th>
+              <th>Shares</th>
+              <th>Price</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="trades-table-body">
+            <tr><td colspan="6" style="text-align:center; color:var(--text3); padding: 20px;">Loading trades...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
+
   </div>
-
-  <!-- Trades Dashboard Section -->
-  <div class="card">
-    <div class="toolbar">
-      <div>
-        <div class="card-title">Trade Dashboard & History</div>
-        <div class="card-subtitle">Interactive logs of all buy and sell executions with analytics</div>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table class="trades-table">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Type</th>
-            <th>Symbol</th>
-            <th>Shares</th>
-            <th>Price</th>
-            <th>Total Amount</th>
-            <th style="width:50px"></th>
-          </tr>
-        </thead>
-        <tbody id="trades-table-body">
-          <tr><td colspan="7" style="text-align:center; color:var(--text3); padding: 20px;">Loading trades...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
 </div>
 
 <!-- Interactive Trade Modal -->
@@ -194,7 +206,7 @@
         <input type="number" id="trade-shares" step="any" placeholder="0.00" required />
       </div>
       <div class="form-group-custom">
-        <label id="price-label">Purchase Price ($)</label>
+        <label id="price-label">Price ($)</label>
         <input type="number" id="trade-price" step="any" placeholder="0.00" required />
       </div>
       <div class="form-group-custom">
@@ -203,7 +215,40 @@
       </div>
       <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px;">
         <button type="button" class="btn btn-ghost" onclick="closeTradeModal()">Cancel</button>
-        <button type="submit" class="btn btn-primary">Execute Trade</button>
+        <button type="submit" class="btn btn-primary">Execute</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit Holding Modal -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span>Edit Holding Lot</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeEditModal()">✕</button>
+    </div>
+    <form id="edit-form" onsubmit="handleEditSubmit(event)">
+      <input type="hidden" id="edit-id" />
+      <div class="form-group-custom">
+        <label>Symbol</label>
+        <input type="text" id="edit-sym" readonly style="opacity: 0.7;" />
+      </div>
+      <div class="form-group-custom">
+        <label>Shares</label>
+        <input type="number" id="edit-shares" step="any" required />
+      </div>
+      <div class="form-group-custom">
+        <label>Purchase Price ($)</label>
+        <input type="number" id="edit-price" step="any" required />
+      </div>
+      <div class="form-group-custom">
+        <label>Date</label>
+        <input type="date" id="edit-date" required />
+      </div>
+      <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
       </div>
     </form>
   </div>
@@ -315,7 +360,7 @@ function renderTable() {
 
     const currentShares = totalBuyShares - totalSellShares;
     
-    // Auto-remove display/filter out if shares are 0 or less
+    // Automatically hide/disappear if shares are 0 or less
     if (currentShares <= 0) return;
 
     const avgCost = totalCostBasis / totalBuyShares; 
@@ -338,7 +383,7 @@ function renderTable() {
     });
   });
 
-  // Sort holdings based on current selection
+  // Sort holdings based on user selection
   currentHoldingsList.sort((a, b) => {
     let valA = a[currentSortKey];
     let valB = b[currentSortKey];
@@ -384,7 +429,8 @@ function renderTable() {
           <td style="font-family:'DM Mono',monospace">${formatColor(bTotChange, fmtPct(bTotChangePct))}</td>
           <td style="font-family:'DM Mono',monospace">${fmtMoney(bVal)}</td>
           <td>
-            <button class="btn btn-ghost btn-xs" style="font-size:10px; padding:2px 6px;" onclick="openTradeModal('SELL', '${sym}', ${bShares}, ${bPrice})" title="Sell Lot">Sell</button>
+            <button class="btn btn-ghost btn-xs" style="font-size:10px; padding:2px 4px;" onclick="openEditModal(${b.id}, '${sym}', ${bShares}, ${bPrice}, '${b.purchase_date}')" title="Edit Lot">Edit</button>
+            <button class="btn btn-ghost btn-xs" style="font-size:10px; padding:2px 4px;" onclick="openTradeModal('SELL', '${sym}', ${bShares}, ${bPrice})" title="Sell Lot">Sell</button>
             <button class="btn btn-danger btn-icon btn-sm" onclick="deleteBuy(${b.id})" title="Delete">✕</button>
           </td>
         </tr>
@@ -414,11 +460,24 @@ function renderTable() {
   const grandTotalChange = grandTotalValue - grandTotalCost;
   const grandTotalPct = grandTotalCost > 0 ? (grandTotalChange / grandTotalCost) * 100 : 0;
   
+  // Calculate total money made from finished/realized trades
+  let totalRealizedPnL = 0;
+  rawTrades.forEach(t => {
+    const sShares = parseFloat(t.shares);
+    const sPrice = parseFloat(t.sell_price);
+    const sCost = parseFloat(t.cost_basis);
+    totalRealizedPnL += (sPrice - sCost) * sShares;
+  });
+
   document.getElementById('kpi-cost').textContent = fmtMoney(grandTotalCost);
   document.getElementById('kpi-value').textContent = fmtMoney(grandTotalValue);
   const retEl = document.getElementById('kpi-return');
   retEl.innerHTML = formatColor(grandTotalChange, fmtMoney(Math.abs(grandTotalChange)) + ' (' + fmtPct(grandTotalPct) + ')');
   retEl.className = 'kpi-value ' + (grandTotalChange >= 0 ? 'val-green' : 'val-red');
+
+  const realizedEl = document.getElementById('kpi-realized');
+  realizedEl.textContent = fmtMoney(totalRealizedPnL);
+  realizedEl.className = 'kpi-value ' + (totalRealizedPnL >= 0 ? 'val-green' : 'val-red');
 }
 
 function renderTradesTable() {
@@ -432,7 +491,7 @@ function renderTradesTable() {
   tbody.innerHTML = '';
   
   if(!allTrades.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text3); padding: 20px;">No trades recorded.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text3); padding: 20px;">No trades recorded.</td></tr>';
     return;
   }
   
@@ -448,8 +507,7 @@ function renderTradesTable() {
         <td style="font-weight:600;">${t.sym}</td>
         <td style="font-family:'DM Mono',monospace">${fmtNum(t.qty)}</td>
         <td style="font-family:'DM Mono',monospace">${fmtMoney(t.price)}</td>
-        <td style="font-family:'DM Mono',monospace">${fmtMoney(totalAmt)}</td>
-        <td><button class="btn btn-danger btn-icon btn-sm" onclick="${isBuy ? 'deleteBuy' : 'deleteSell'}(${t.id})" title="Delete Trade">✕</button></td>
+        <td><button class="btn btn-danger btn-icon btn-sm" onclick="${isBuy ? 'deleteBuy' : 'deleteSell'}(${t.id})" title="Delete">✕</button></td>
       </tr>
     `;
   });
@@ -515,8 +573,6 @@ function renderMainChart(period) {
   const labels = filteredData.map(d => d.date);
   const valData = filteredData.map(d => d.value);
   const costData = filteredData.map(d => d.cost);
-  
-  // USD Baseline Line (Simulated neutral currency reference line tracking cost baseline)
   const usdLine = costData; 
 
   const ctx = document.getElementById('value-chart').getContext('2d');
@@ -643,16 +699,18 @@ function renderHeatmap(period) {
       bgColor = `rgba(224,92,106,${intensity})`;
     }
 
+    // Proportional width based strictly on Total Asset value percentage
     const weight = h.val / totalPortfolioValue;
-    const widthPct = Math.max(12, weight * 100); 
+    const widthPct = Math.max(14, weight * 100); 
 
     const tooltipBase = `${sym}: ${fmtPct(pctChange)} ${period === 'ALL' ? 'from purchase' : 'over ' + period}`;
     const tooltipExtra = period === 'ALL' ? ` | Avg Cost: ${fmtMoney(h.avgCost)}` : '';
     
     container.innerHTML += `
-      <div class="hm-block" style="background: ${bgColor}; width: ${widthPct}%;" title="${tooltipBase}${tooltipExtra}">
+      <div class="hm-block" style="background: ${bgColor}; width: calc(${widthPct}% - 6px);" title="${tooltipBase}${tooltipExtra}">
         <div class="hm-sym">${sym}</div>
         <div class="hm-pct">${fmtPct(pctChange)}</div>
+        <div class="hm-val">${fmtMoney(h.val)}</div>
       </div>
     `;
   });
@@ -696,20 +754,48 @@ async function handleTradeSubmit(e) {
   const date = document.getElementById('trade-date').value;
 
   if (!sym || isNaN(shares) || isNaN(price)) return;
-
   closeTradeModal();
 
   if (type === 'BUY') {
     await FF.post('/api/stocks', { symbol: sym, quantity: shares, purchase_price: price, purchase_date: date });
   } else {
-    // SELL execution: post trade and find matching cost basis if possible
-    await FF.post('/api/stock-trades', { symbol: sym, shares: shares, sell_price: price, trade_date: date });
+    // Find matching cost basis from existing holdings if possible
+    let costBasis = price;
+    if (portfolioData[sym] && portfolioData[sym].buys.length > 0) {
+      let totalB = portfolioData[sym].buys.reduce((s,b)=>s+parseFloat(b.quantity),0);
+      let totalC = portfolioData[sym].buys.reduce((s,b)=>s+(parseFloat(b.quantity)*parseFloat(b.purchase_price)),0);
+      if(totalB > 0) costBasis = totalC / totalB;
+    }
+    await FF.post('/api/stock-trades', { symbol: sym, shares: shares, sell_price: price, cost_basis: costBasis, trade_date: date });
   }
   loadPortfolio();
 }
 
-function promptSellLot(sym, maxShares, avgCost) {
-  openTradeModal('SELL', sym, maxShares, avgCost);
+// Edit Modal Controls
+function openEditModal(id, sym, shares, price, date) {
+  document.getElementById('edit-modal').style.display = 'flex';
+  document.getElementById('edit-id').value = id;
+  document.getElementById('edit-sym').value = sym;
+  document.getElementById('edit-shares').value = shares;
+  document.getElementById('edit-price').value = price;
+  document.getElementById('edit-date').value = date || new Date().toISOString().split('T')[0];
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal').style.display = 'none';
+}
+
+async function handleEditSubmit(e) {
+  e.preventDefault();
+  const id = document.getElementById('edit-id').value;
+  const sym = document.getElementById('edit-sym').value;
+  const shares = parseFloat(document.getElementById('edit-shares').value);
+  const price = parseFloat(document.getElementById('edit-price').value);
+  const date = document.getElementById('edit-date').value;
+
+  closeEditModal();
+  await FF.put(`/api/stocks/${id}`, { symbol: sym, quantity: shares, purchase_price: price, purchase_date: date, notes: '' });
+  loadPortfolio();
 }
 
 async function deleteBuy(id) { if (confirm("Delete this purchase lot?")) { await FF.del(`/api/stocks/${id}`); loadPortfolio(); } }
