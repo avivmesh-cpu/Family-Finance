@@ -1,130 +1,141 @@
 {% extends "base.html" %}
 {% block title %}Stock Portfolio{% endblock %}
 {% block page_title %}Portfolio{% endblock %}
-{% block page_subtitle %}Classic view of holdings and transactions{% endblock %}
+{% block page_subtitle %}Comprehensive view of your holdings, allocation, and performance{% endblock %}
 
 {% block content %}
 <style>
   /* Match native app styling using CSS variables */
-  .stock-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 13px;
-    color: var(--text);
-  }
-  .stock-table th {
-    background: var(--bg3);
-    border-bottom: 1px solid var(--border2);
-    text-align: right;
-    padding: 10px;
-    font-weight: 600;
-    color: var(--text2);
-  }
+  .stock-table { width: 100%; border-collapse: collapse; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); }
+  .stock-table th { background: var(--bg3); border-bottom: 1px solid var(--border2); text-align: right; padding: 10px; font-weight: 600; color: var(--text2); }
   .stock-table th:first-child { text-align: left; }
-  .stock-table td {
-    padding: 10px;
-    border-bottom: 1px solid var(--border2);
-    text-align: right;
-  }
+  .stock-table td { padding: 10px; border-bottom: 1px solid var(--border2); text-align: right; }
   .stock-table td:first-child { text-align: left; }
   
-  .row-main {
-    background: var(--surface);
-    cursor: pointer;
-    font-weight: 500;
-    transition: background 0.2s;
-  }
+  .row-main { background: var(--surface); cursor: pointer; font-weight: 500; transition: background 0.2s; }
   .row-main:hover { background: var(--bg2); }
-  .row-buy {
-    background: var(--bg);
-    color: var(--text2);
-    display: none; 
-  }
-  .row-sell {
-    background: var(--bg);
-    color: var(--text3);
-    font-style: italic;
-    display: none;
-  }
+  .row-buy { background: var(--bg); color: var(--text2); display: none; }
+  .row-sell { background: var(--bg); color: var(--text3); font-style: italic; display: none; }
   
   .val-green { color: var(--green); }
   .val-red { color: var(--red); }
   .sym-link { color: var(--accent); font-weight: 600; cursor: pointer; }
   
-  .chart-container { height: 320px; position: relative; }
-  
-  .toolbar {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 16px;
-    align-items: center;
-  }
-  
+  .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; }
   .time-filters { display: flex; gap: 4px; }
-  .btn-filter {
-    background: var(--bg3); border: 1px solid var(--border2);
-    color: var(--text); padding: 4px 10px; font-size: 11px;
-    border-radius: 4px; cursor: pointer; font-weight: 500;
-  }
+  .btn-filter { background: var(--bg3); border: 1px solid var(--border2); color: var(--text); padding: 4px 10px; font-size: 11px; border-radius: 4px; cursor: pointer; font-weight: 500; }
   .btn-filter.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .btn-filter:hover:not(.active) { background: var(--bg2); }
+
+  /* Heatmap Styles */
+  .heatmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(75px, 1fr)); gap: 8px; }
+  .hm-block { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px 4px; border-radius: 4px; color: #fff; font-family: 'DM Mono', monospace; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1); transition: transform 0.2s; }
+  .hm-block:hover { transform: scale(1.05); }
+  .hm-sym { font-weight: 600; font-size: 14px; font-family: 'DM Sans', sans-serif; }
+  .hm-pct { font-size: 11px; margin-top: 4px; }
+
+  /* Trades Timeline Styles */
+  .trade-item { padding: 10px 0; border-bottom: 1px solid var(--border2); display: flex; justify-content: space-between; align-items: center; }
+  .trade-item:last-child { border-bottom: none; }
+  .trade-badge-buy { background: rgba(76,175,136,0.15); color: var(--green); padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+  .trade-badge-sell { background: rgba(224,92,106,0.15); color: var(--red); padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+  .trade-meta { font-size: 11px; color: var(--text3); }
+  .trade-details { font-family: 'DM Mono', monospace; font-size: 12px; text-align: right; }
 </style>
 
 <div class="page-body">
 
+  <!-- KPIs -->
+  <div class="kpi-grid" id="portfolio-kpis">
+    <div class="kpi-card"><div class="kpi-label">Total Investment (Cost)</div><div class="kpi-value" id="kpi-cost">—</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">Total Market Value</div><div class="kpi-value blue" id="kpi-value">—</div></div>
+    <div class="kpi-card"><div class="kpi-label">All-Time Return</div><div class="kpi-value" id="kpi-return">—</div></div>
+  </div>
+
+  <!-- Main Chart -->
   <div class="card mb-24">
     <div class="toolbar">
       <div>
-        <div class="card-title">Change in Value (PnL)</div>
-        <div class="card-subtitle">Historical portfolio profit/loss over time</div>
-      </div>
-      <div class="time-filters" id="chart-filters">
-        <button class="btn-filter" data-period="1M">1M</button>
-        <button class="btn-filter" data-period="3M">3M</button>
-        <button class="btn-filter" data-period="6M">6M</button>
-        <button class="btn-filter" data-period="YTD">YTD</button>
-        <button class="btn-filter" data-period="1Y">1Y</button>
-        <button class="btn-filter active" data-period="ALL">ALL</button>
+        <div class="card-title">Portfolio Value vs. Investment</div>
+        <div class="card-subtitle">Track your total market value against your invested capital</div>
       </div>
     </div>
-    <div class="chart-container">
-      <canvas id="pnl-chart"></canvas>
+    <div style="height: 300px; position: relative;">
+      <canvas id="value-chart"></canvas>
     </div>
   </div>
 
-  <div class="card">
-    <div class="toolbar">
-      <div>
-        <div class="card-title">Holdings & Transactions</div>
-        <div class="card-subtitle">Click a ticker to view individual buy and sell lots</div>
+  <!-- Pie Chart & Heatmap Row -->
+  <div class="grid-2 mb-24">
+    <div class="card">
+      <div class="card-title mb-16">Asset Allocation</div>
+      <div style="height: 240px; position: relative;">
+        <canvas id="allocation-chart"></canvas>
       </div>
-      <div style="display:flex; gap: 8px;">
-        <button class="btn btn-ghost btn-sm" onclick="expandAll()">Expand All</button>
-        <button class="btn btn-ghost btn-sm" onclick="collapseAll()">Collapse All</button>
-        <button class="btn btn-primary btn-sm" onclick="promptAddTransaction()">+ Add Transaction</button>
+    </div>
+    
+    <div class="card">
+      <div class="toolbar" style="margin-bottom: 12px;">
+        <div class="card-title">Performance Heatmap</div>
+        <div class="time-filters" id="hm-filters">
+          <button class="btn-filter" data-period="1M">1M</button>
+          <button class="btn-filter" data-period="3M">3M</button>
+          <button class="btn-filter" data-period="6M">6M</button>
+          <button class="btn-filter active" data-period="YTD">YTD</button>
+          <button class="btn-filter" data-period="1Y">1Y</button>
+        </div>
+      </div>
+      <div class="heatmap-grid" id="heatmap-container">
+        <!-- Heatmap blocks generated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Holdings & Trades Row -->
+  <div style="display: grid; grid-template-columns: 2.5fr 1fr; gap: 24px;">
+    
+    <!-- Table -->
+    <div class="card">
+      <div class="toolbar">
+        <div>
+          <div class="card-title">Holdings</div>
+          <div class="card-subtitle">Click a ticker to view individual lots</div>
+        </div>
+        <div style="display:flex; gap: 8px;">
+          <button class="btn btn-ghost btn-sm" onclick="expandAll()">Expand</button>
+          <button class="btn btn-ghost btn-sm" onclick="collapseAll()">Collapse</button>
+          <button class="btn btn-primary btn-sm" onclick="promptAddTransaction()">+ Add</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="stock-table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Shares</th>
+              <th>Avg Cost</th>
+              <th>Price</th>
+              <th>Total Change</th>
+              <th>Market Value</th>
+              <th style="width:30px"></th>
+            </tr>
+          </thead>
+          <tbody id="portfolio-body">
+            <tr><td colspan="7" style="text-align:center; padding: 20px;">Loading market data...</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
-    <div class="table-wrap">
-      <table class="stock-table">
-        <thead>
-          <tr>
-            <th>Symbol / Date</th>
-            <th>Shares</th>
-            <th>Cost/Price</th>
-            <th>Current Price</th>
-            <th>Day Change</th>
-            <th>Total Change</th>
-            <th>Market Value</th>
-            <th style="width:40px"></th>
-          </tr>
-        </thead>
-        <tbody id="portfolio-body">
-          <tr><td colspan="8" style="text-align:center; padding: 20px;">Loading market data...</td></tr>
-        </tbody>
-      </table>
+    <!-- Trades Column -->
+    <div class="card">
+      <div class="card-title mb-16">Recent Trades</div>
+      <div id="trades-list" style="max-height: 400px; overflow-y: auto; padding-right: 8px;">
+        <!-- Trades generated by JS -->
+      </div>
     </div>
+
   </div>
 </div>
 
@@ -135,19 +146,15 @@
 <script>
 let portfolioData = {};
 let detailsData = {};
-let pnlChart = null;
-let masterPnLData = []; // Array of {date, pnl}
+let historyData = {};
+let valChart = null;
+let pieChart = null;
+let masterChartData = []; // Array of {date, value, cost}
+let currentHoldingsList = []; // Array of {sym, val, currentShares}
 
 const fmtNum = (n) => new Intl.NumberFormat('en-US').format(n);
 const fmtMoney = (n) => '$' + n.toFixed(2);
 const fmtPct = (n) => (n > 0 ? '+' : '') + n.toFixed(2) + '%';
-const fmtCap = (n) => {
-  if(!n) return '—';
-  if(n >= 1e12) return '$' + (n / 1e12).toFixed(2) + 'T';
-  if(n >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
-  if(n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
-  return '$' + fmtNum(n);
-};
 
 function formatColor(val, text) {
   if (val > 0) return `<span class="val-green">${text}</span>`;
@@ -157,18 +164,10 @@ function formatColor(val, text) {
 
 function toggleSymbol(sym) {
   const rows = document.querySelectorAll(`.child-of-${sym}`);
-  rows.forEach(r => {
-    r.style.display = (r.style.display === 'none' || r.style.display === '') ? 'table-row' : 'none';
-  });
+  rows.forEach(r => { r.style.display = (r.style.display === 'none' || r.style.display === '') ? 'table-row' : 'none'; });
 }
-
-function expandAll() {
-  document.querySelectorAll('.row-buy, .row-sell').forEach(r => r.style.display = 'table-row');
-}
-
-function collapseAll() {
-  document.querySelectorAll('.row-buy, .row-sell').forEach(r => r.style.display = 'none');
-}
+function expandAll() { document.querySelectorAll('.row-buy, .row-sell').forEach(r => r.style.display = 'table-row'); }
+function collapseAll() { document.querySelectorAll('.row-buy, .row-sell').forEach(r => r.style.display = 'none'); }
 
 async function loadPortfolio() {
   try {
@@ -180,7 +179,9 @@ async function loadPortfolio() {
     ]);
     
     detailsData = details;
+    historyData = history.series || {};
     portfolioData = {};
+    currentHoldingsList = [];
     
     // Group Buys
     holdings.forEach(h => {
@@ -197,10 +198,13 @@ async function loadPortfolio() {
     });
 
     renderTable();
-    calculateHistoricalPnL(holdings, trades, history.series);
+    renderTradesList(holdings, trades);
+    calculateHistoricalData(holdings, trades);
+    renderAllocationPie();
+    renderHeatmap('YTD'); // Default HM period
     
   } catch (err) {
-    document.getElementById('portfolio-body').innerHTML = `<tr><td colspan="8" class="val-red">Error loading data: ${err}</td></tr>`;
+    document.getElementById('portfolio-body').innerHTML = `<tr><td colspan="7" class="val-red">Error loading data: ${err}</td></tr>`;
   }
 }
 
@@ -210,51 +214,40 @@ function renderTable() {
   
   let grandTotalValue = 0;
   let grandTotalCost = 0;
-  let grandDayChange = 0;
 
   Object.keys(portfolioData).sort().forEach(sym => {
     const data = portfolioData[sym];
     const mkt = detailsData[sym] || { price: 0, prev: 0, mktcap: 0 };
     
-    let totalBuyShares = 0;
-    let totalCostBasis = 0;
-    
+    let totalBuyShares = 0; let totalCostBasis = 0;
     data.buys.forEach(b => {
       totalBuyShares += parseFloat(b.quantity);
       totalCostBasis += (parseFloat(b.quantity) * parseFloat(b.purchase_price));
     });
     
     let totalSellShares = 0;
-    data.sells.forEach(s => {
-      totalSellShares += parseFloat(s.shares);
-    });
+    data.sells.forEach(s => { totalSellShares += parseFloat(s.shares); });
 
     const currentShares = totalBuyShares - totalSellShares;
     const avgCost = currentShares > 0 ? (totalCostBasis / totalBuyShares) : 0; 
     
     const marketValue = currentShares * mkt.price;
-    const dayChangeVal = currentShares * (mkt.price - mkt.prev);
-    const dayChangePct = mkt.prev > 0 ? ((mkt.price - mkt.prev) / mkt.prev) * 100 : 0;
     const totalChangeVal = marketValue - (currentShares * avgCost);
     const totalChangePct = avgCost > 0 ? (totalChangeVal / (currentShares * avgCost)) * 100 : 0;
 
     if (currentShares > 0) {
       grandTotalValue += marketValue;
       grandTotalCost += (currentShares * avgCost);
-      grandDayChange += dayChangeVal;
+      currentHoldingsList.push({ sym, val: marketValue, currentShares });
     }
 
     // --- Master Row ---
     let html = `
       <tr class="row-main" onclick="toggleSymbol('${sym}')">
-        <td>
-          <span class="sym-link">${sym}</span>
-          <div style="font-size:10px; font-weight:normal; color:var(--text3);">Cap: ${fmtCap(mkt.mktcap)}</div>
-        </td>
+        <td><span class="sym-link">${sym}</span></td>
         <td style="font-family:'DM Mono',monospace">${fmtNum(currentShares)}</td>
         <td style="font-family:'DM Mono',monospace">${fmtMoney(avgCost)}</td>
         <td style="font-family:'DM Mono',monospace">${fmtMoney(mkt.price)}</td>
-        <td style="font-family:'DM Mono',monospace">${formatColor(dayChangeVal, fmtMoney(Math.abs(dayChangeVal)) + ' (' + fmtPct(dayChangePct) + ')')}</td>
         <td style="font-family:'DM Mono',monospace">${formatColor(totalChangeVal, fmtMoney(Math.abs(totalChangeVal)) + ' (' + fmtPct(totalChangePct) + ')')}</td>
         <td style="font-family:'DM Mono',monospace; font-weight:600">${fmtMoney(marketValue)}</td>
         <td></td>
@@ -263,44 +256,35 @@ function renderTable() {
 
     // --- Buy Lots ---
     data.buys.sort((a,b) => (a.purchase_date || '').localeCompare(b.purchase_date || '')).forEach(b => {
-      const bShares = parseFloat(b.quantity);
-      const bPrice = parseFloat(b.purchase_price);
-      const bCost = bShares * bPrice;
-      const bVal = bShares * mkt.price;
-      const bTotChange = bVal - bCost;
-      const bTotChangePct = bPrice > 0 ? (bTotChange / bCost) * 100 : 0;
-      
+      const bShares = parseFloat(b.quantity); const bPrice = parseFloat(b.purchase_price);
+      const bCost = bShares * bPrice; const bVal = bShares * mkt.price;
+      const bTotChange = bVal - bCost; const bTotChangePct = bPrice > 0 ? (bTotChange / bCost) * 100 : 0;
       html += `
         <tr class="row-buy child-of-${sym}">
-          <td style="padding-left: 24px;">Buy: ${b.purchase_date || 'N/A'}</td>
+          <td style="padding-left: 16px; font-size:11px;">Buy: ${b.purchase_date || 'N/A'}</td>
           <td style="font-family:'DM Mono',monospace">${fmtNum(bShares)}</td>
           <td style="font-family:'DM Mono',monospace">${fmtMoney(bPrice)}</td>
           <td>--</td>
-          <td>--</td>
-          <td style="font-family:'DM Mono',monospace">${formatColor(bTotChange, fmtMoney(Math.abs(bTotChange)) + ' (' + fmtPct(bTotChangePct) + ')')}</td>
+          <td style="font-family:'DM Mono',monospace">${formatColor(bTotChange, fmtPct(bTotChangePct))}</td>
           <td style="font-family:'DM Mono',monospace">${fmtMoney(bVal)}</td>
-          <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteBuy(${b.id})" title="Delete Buy">✕</button></td>
+          <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteBuy(${b.id})" title="Delete">✕</button></td>
         </tr>
       `;
     });
 
     // --- Sell Lots ---
     data.sells.sort((a,b) => (a.trade_date || '').localeCompare(b.trade_date || '')).forEach(s => {
-      const sShares = parseFloat(s.shares);
-      const sPrice = parseFloat(s.sell_price);
-      const sCost = parseFloat(s.cost_basis);
-      const realized = (sPrice - sCost) * sShares;
-      
+      const sShares = parseFloat(s.shares); const sPrice = parseFloat(s.sell_price);
+      const sCost = parseFloat(s.cost_basis); const realized = (sPrice - sCost) * sShares;
       html += `
         <tr class="row-sell child-of-${sym}">
-          <td style="padding-left: 24px;">Sell: ${s.trade_date || 'N/A'}</td>
+          <td style="padding-left: 16px; font-size:11px;">Sell: ${s.trade_date || 'N/A'}</td>
           <td style="font-family:'DM Mono',monospace">-${fmtNum(sShares)}</td>
           <td style="font-family:'DM Mono',monospace">${fmtMoney(sPrice)}</td>
           <td>--</td>
-          <td>--</td>
           <td style="font-family:'DM Mono',monospace">Realized: ${formatColor(realized, fmtMoney(Math.abs(realized)))}</td>
           <td>--</td>
-          <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteSell(${s.id})" title="Delete Sell">✕</button></td>
+          <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteSell(${s.id})" title="Delete">✕</button></td>
         </tr>
       `;
     });
@@ -308,196 +292,239 @@ function renderTable() {
     tbody.innerHTML += html;
   });
 
-  // Render Footer Totals
+  // KPIs Update
   const grandTotalChange = grandTotalValue - grandTotalCost;
   const grandTotalPct = grandTotalCost > 0 ? (grandTotalChange / grandTotalCost) * 100 : 0;
   
-  tbody.innerHTML += `
-    <tr style="background:var(--bg3); font-weight:600; border-top: 2px solid var(--border2);">
-      <td>Total Portfolio</td>
-      <td></td>
-      <td></td>
-      <td></td>
-      <td style="font-family:'DM Mono',monospace">${formatColor(grandDayChange, fmtMoney(Math.abs(grandDayChange)))}</td>
-      <td style="font-family:'DM Mono',monospace">${formatColor(grandTotalChange, fmtMoney(Math.abs(grandTotalChange)) + ' (' + fmtPct(grandTotalPct) + ')')}</td>
-      <td style="font-family:'DM Mono',monospace; color:var(--accent)">${fmtMoney(grandTotalValue)}</td>
-      <td></td>
-    </tr>
-  `;
+  document.getElementById('kpi-cost').textContent = fmtMoney(grandTotalCost);
+  document.getElementById('kpi-value').textContent = fmtMoney(grandTotalValue);
+  const retEl = document.getElementById('kpi-return');
+  retEl.innerHTML = formatColor(grandTotalChange, fmtMoney(Math.abs(grandTotalChange)) + ' (' + fmtPct(grandTotalPct) + ')');
+  retEl.className = 'kpi-value ' + (grandTotalChange >= 0 ? 'val-green' : 'val-red');
 }
 
-function calculateHistoricalPnL(holdings, trades, historySeries) {
-  // Combine all dates from history series
-  const dateSet = new Set();
-  Object.values(historySeries || {}).forEach(prices => {
-    Object.keys(prices).forEach(d => dateSet.add(d));
-  });
+function renderTradesList(holdings, trades) {
+  let allTrades = [];
+  holdings.forEach(h => { if(h.purchase_date) allTrades.push({ type: 'BUY', date: h.purchase_date, sym: h.symbol, qty: +h.quantity, price: +h.purchase_price }); });
+  trades.forEach(t => { if(t.trade_date) allTrades.push({ type: 'SELL', date: t.trade_date, sym: t.symbol, qty: +t.shares, price: +t.sell_price }); });
   
-  // Add today's date with current details prices to ensure latest data is plotted
+  allTrades.sort((a,b) => b.date.localeCompare(a.date)); // Newest first
+  
+  const container = document.getElementById('trades-list');
+  container.innerHTML = '';
+  
+  if(!allTrades.length) {
+    container.innerHTML = '<div style="color:var(--text3); font-size:12px;">No trades recorded.</div>';
+    return;
+  }
+  
+  allTrades.forEach(t => {
+    const isBuy = t.type === 'BUY';
+    const badge = isBuy ? `<span class="trade-badge-buy">BUY</span>` : `<span class="trade-badge-sell">SELL</span>`;
+    const total = t.qty * t.price;
+    container.innerHTML += `
+      <div class="trade-item">
+        <div>
+          <div style="font-weight:600;">${badge} ${t.sym}</div>
+          <div class="trade-meta">${t.date}</div>
+        </div>
+        <div class="trade-details">
+          <div>${fmtNum(t.qty)} @ ${fmtMoney(t.price)}</div>
+          <div style="color:var(--text3)">Total: ${fmtMoney(total)}</div>
+        </div>
+      </div>
+    `;
+  });
+}
+
+function calculateHistoricalData(holdings, trades) {
+  const dateSet = new Set();
+  Object.values(historyData || {}).forEach(prices => { Object.keys(prices).forEach(d => dateSet.add(d)); });
   const todayStr = new Date().toISOString().split('T')[0];
   dateSet.add(todayStr);
-  
   const sortedDates = Array.from(dateSet).sort();
   
-  // Build chronological events
   let events = [];
-  holdings.forEach(h => {
-    if(h.purchase_date) events.push({type: 'buy', date: h.purchase_date, sym: h.symbol, qty: +h.quantity, price: +h.purchase_price});
-  });
-  trades.forEach(t => {
-    if(t.trade_date) events.push({type: 'sell', date: t.trade_date, sym: t.symbol, qty: +t.shares, cost: +t.cost_basis});
-  });
+  holdings.forEach(h => { if(h.purchase_date) events.push({type: 'buy', date: h.purchase_date, sym: h.symbol, qty: +h.quantity, price: +h.purchase_price}); });
+  trades.forEach(t => { if(t.trade_date) events.push({type: 'sell', date: t.trade_date, sym: t.symbol, qty: +t.shares, cost: +t.cost_basis}); });
   events.sort((a,b) => a.date.localeCompare(b.date));
 
-  let pos = {}; // { AAPL: { qty: 0, cost: 0 } }
+  let pos = {}; 
   let lastKnownPrice = {};
   let eIdx = 0;
-  masterPnLData = [];
+  masterChartData = [];
 
   sortedDates.forEach(date => {
-    // Process events up to this date
     while(eIdx < events.length && events[eIdx].date <= date) {
       let ev = events[eIdx];
       if(!pos[ev.sym]) pos[ev.sym] = {qty: 0, cost: 0};
-      
-      if(ev.type === 'buy') {
-        pos[ev.sym].qty += ev.qty;
-        pos[ev.sym].cost += (ev.qty * ev.price);
-      } else if(ev.type === 'sell') {
-        pos[ev.sym].qty -= ev.qty;
-        pos[ev.sym].cost -= (ev.qty * ev.cost);
-      }
+      if(ev.type === 'buy') { pos[ev.sym].qty += ev.qty; pos[ev.sym].cost += (ev.qty * ev.price); } 
+      else if(ev.type === 'sell') { pos[ev.sym].qty -= ev.qty; pos[ev.sym].cost -= (ev.qty * ev.cost); }
       eIdx++;
     }
 
-    let totalVal = 0;
-    let totalCost = 0;
-    let hasPositions = false;
-    
+    let totalVal = 0; let totalCost = 0; let hasPositions = false;
     for(let sym in pos) {
       if(pos[sym].qty > 0) {
         hasPositions = true;
-        let p = (date === todayStr && detailsData[sym]) ? detailsData[sym].price : (historySeries[sym]?.[date] || lastKnownPrice[sym] || 0);
+        let p = (date === todayStr && detailsData[sym]) ? detailsData[sym].price : (historyData[sym]?.[date] || lastKnownPrice[sym] || 0);
         if(p > 0) lastKnownPrice[sym] = p; 
-        
         totalVal += (pos[sym].qty * lastKnownPrice[sym]);
         totalCost += pos[sym].cost;
       }
     }
-    
-    if (hasPositions) {
-      masterPnLData.push({ date: date, pnl: totalVal - totalCost });
-    }
+    if (hasPositions) masterChartData.push({ date: date, value: totalVal, cost: totalCost });
   });
 
-  renderChart('ALL'); // Default to ALL
+  renderMainChart();
 }
 
-function renderChart(period) {
-  if (!masterPnLData.length) return;
+function renderMainChart() {
+  if (!masterChartData.length) return;
+  const labels = masterChartData.map(d => d.date);
+  const valData = masterChartData.map(d => d.value);
+  const costData = masterChartData.map(d => d.cost);
+
+  const ctx = document.getElementById('value-chart').getContext('2d');
+  if (valChart) valChart.destroy();
+  
+  valChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Total Value ($)',
+          data: valData,
+          borderColor: '#5b8df6',
+          backgroundColor: 'rgba(91,141,246,0.1)',
+          borderWidth: 2, fill: true, pointRadius: 0, pointHoverRadius: 4, tension: 0.2
+        },
+        {
+          label: 'Invested Cost ($)',
+          data: costData,
+          borderColor: '#9aa0bb',
+          borderWidth: 2, borderDash: [5, 5], fill: false, pointRadius: 0, pointHoverRadius: 0, tension: 0.2
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'top' },
+        tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => ctx.dataset.label + ': ' + fmtMoney(ctx.parsed.y) } }
+      },
+      interaction: { mode: 'index', intersect: false },
+      scales: { y: { ticks: { callback: v => '$' + v } } }
+    }
+  });
+}
+
+function renderAllocationPie() {
+  if (!currentHoldingsList.length) return;
+  
+  currentHoldingsList.sort((a,b) => b.val - a.val); // Sort by value desc
+  const labels = currentHoldingsList.map(h => h.sym);
+  const data = currentHoldingsList.map(h => h.val);
+  
+  // Custom palette for charts
+  const palette = ['#5b8df6','#4caf88','#c9a84c','#e05c6a','#9b7cf8','#4cc9c9','#f08c4b','#e87dbd','#7dc8e8','#a8d86e'];
+  const bgColors = labels.map((_, i) => palette[i % palette.length]);
+
+  const ctx = document.getElementById('allocation-chart').getContext('2d');
+  if (pieChart) pieChart.destroy();
+  
+  pieChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels: labels, datasets: [{ data: data, backgroundColor: bgColors, borderWidth: 2, borderColor: 'var(--surface)' }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { color: 'var(--text2)', font: { size: 11 }, boxWidth: 12 } },
+        tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + fmtMoney(ctx.parsed) } }
+      },
+      cutout: '65%'
+    }
+  });
+}
+
+function renderHeatmap(period) {
+  const container = document.getElementById('heatmap-container');
+  container.innerHTML = '';
+
+  if (!currentHoldingsList.length) {
+    container.innerHTML = '<div style="color:var(--text3); font-size:12px; grid-column: 1/-1;">No holdings to display.</div>';
+    return;
+  }
 
   const today = new Date();
   let cutoffDate = new Date('1970-01-01');
-  
   if (period === '1M') cutoffDate = new Date(today.setMonth(today.getMonth() - 1));
   else if (period === '3M') cutoffDate = new Date(today.setMonth(today.getMonth() - 3));
   else if (period === '6M') cutoffDate = new Date(today.setMonth(today.getMonth() - 6));
   else if (period === 'YTD') cutoffDate = new Date(today.getFullYear(), 0, 1);
   else if (period === '1Y') cutoffDate = new Date(today.setFullYear(today.getFullYear() - 1));
-  
   const cutoffStr = cutoffDate.toISOString().split('T')[0];
-  const filteredData = masterPnLData.filter(d => d.date >= cutoffStr);
-  
-  const labels = filteredData.map(d => d.date);
-  const dataPoints = filteredData.map(d => d.pnl);
 
-  const ctx = document.getElementById('pnl-chart').getContext('2d');
-  if (pnlChart) pnlChart.destroy();
-  
-  pnlChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: 'Change in Value ($)',
-        data: dataPoints,
-        borderColor: 'rgba(76,175,136,1)', // Matches var(--green)
-        backgroundColor: 'rgba(76,175,136,0.1)',
-        borderWidth: 2,
-        fill: true,
-        pointRadius: 0, // hide points for cleaner look over time
-        pointHoverRadius: 4,
-        tension: 0.2
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          mode: 'index',
-          intersect: false,
-          callbacks: { label: ctx => 'PnL: ' + fmtMoney(ctx.parsed.y) }
-        }
-      },
-      interaction: { mode: 'index', intersect: false },
-      scales: {
-        y: { ticks: { callback: v => '$' + v } }
-      }
+  currentHoldingsList.forEach(h => {
+    const sym = h.sym;
+    const currentPrice = detailsData[sym] ? detailsData[sym].price : 0;
+    
+    // Find price around the cutoff date
+    let startPrice = currentPrice; // Default to 0 change if no history
+    if (historyData[sym]) {
+      const dates = Object.keys(historyData[sym]).sort();
+      // Find the first date on or after the cutoff
+      let targetDate = dates.find(d => d >= cutoffStr);
+      if (!targetDate && dates.length) targetDate = dates[0]; // fallback to oldest if cutoff is too far back
+      if (targetDate) startPrice = historyData[sym][targetDate];
     }
+
+    const pctChange = startPrice > 0 ? ((currentPrice - startPrice) / startPrice) * 100 : 0;
+    
+    // Determine block color intensity based on % change
+    let bgColor = '#444'; // Neutral
+    if (pctChange > 0) {
+      const intensity = Math.min(1, Math.max(0.3, pctChange / 15)); // Cap at 15% for max green
+      bgColor = `rgba(76,175,136,${intensity})`;
+    } else if (pctChange < 0) {
+      const intensity = Math.min(1, Math.max(0.3, Math.abs(pctChange) / 15)); // Cap at -15% for max red
+      bgColor = `rgba(224,92,106,${intensity})`;
+    }
+
+    container.innerHTML += `
+      <div class="hm-block" style="background: ${bgColor};" title="${sym}: ${fmtPct(pctChange)} over ${period}">
+        <div class="hm-sym">${sym}</div>
+        <div class="hm-pct">${fmtPct(pctChange)}</div>
+      </div>
+    `;
   });
 }
 
-// Filter button logic
-document.querySelectorAll('.btn-filter').forEach(btn => {
+// Filter button logic for Heatmap
+document.querySelectorAll('#hm-filters .btn-filter').forEach(btn => {
   btn.addEventListener('click', (e) => {
-    document.querySelectorAll('.btn-filter').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#hm-filters .btn-filter').forEach(b => b.classList.remove('active'));
     e.target.classList.add('active');
-    renderChart(e.target.dataset.period);
+    renderHeatmap(e.target.dataset.period);
   });
 });
 
 function promptAddTransaction() {
   const isBuy = confirm("Press OK to add a BUY transaction, or Cancel for a SELL.");
   if(isBuy) {
-    const sym = prompt("Symbol (e.g. AAPL):");
-    if(!sym) return;
-    const qty = prompt("Shares:");
-    const price = prompt("Purchase Price ($):");
-    const date = prompt("Date (YYYY-MM-DD):");
-    
-    if(sym && qty && price) {
-      FF.post('/api/stocks', { symbol: sym, quantity: qty, purchase_price: price, purchase_date: date })
-        .then(() => loadPortfolio());
-    }
+    const sym = prompt("Symbol (e.g. AAPL):"); if(!sym) return;
+    const qty = prompt("Shares:"); const price = prompt("Purchase Price ($):"); const date = prompt("Date (YYYY-MM-DD):");
+    if(sym && qty && price) FF.post('/api/stocks', { symbol: sym, quantity: qty, purchase_price: price, purchase_date: date }).then(() => loadPortfolio());
   } else {
-    const sym = prompt("Symbol (e.g. AAPL):");
-    if(!sym) return;
-    const qty = prompt("Shares Sold:");
-    const price = prompt("Sell Price ($):");
-    const date = prompt("Date (YYYY-MM-DD):");
-    
-    if(sym && qty && price) {
-      FF.post('/api/stock-trades', { symbol: sym, shares: qty, sell_price: price, trade_date: date })
-        .then(() => loadPortfolio());
-    }
+    const sym = prompt("Symbol (e.g. AAPL):"); if(!sym) return;
+    const qty = prompt("Shares Sold:"); const price = prompt("Sell Price ($):"); const date = prompt("Date (YYYY-MM-DD):");
+    if(sym && qty && price) FF.post('/api/stock-trades', { symbol: sym, shares: qty, sell_price: price, trade_date: date }).then(() => loadPortfolio());
   }
 }
 
-async function deleteBuy(id) {
-  if (confirm("Delete this purchase lot? This cannot be undone.")) {
-    await FF.del(`/api/stocks/${id}`);
-    loadPortfolio();
-  }
-}
-
-async function deleteSell(id) {
-  if (confirm("Delete this sell transaction? This cannot be undone.")) {
-    await FF.del(`/api/stock-trades/${id}`);
-    loadPortfolio();
-  }
-}
+async function deleteBuy(id) { if (confirm("Delete this purchase lot?")) { await FF.del(`/api/stocks/${id}`); loadPortfolio(); } }
+async function deleteSell(id) { if (confirm("Delete this sell transaction?")) { await FF.del(`/api/stock-trades/${id}`); loadPortfolio(); } }
 
 // Init
 loadPortfolio();
