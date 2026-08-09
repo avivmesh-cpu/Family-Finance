@@ -28,28 +28,29 @@
   .btn-filter.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .btn-filter:hover:not(.active) { background: var(--bg2); }
 
-  /* Responsive Grid Adjustments for Laptop & iPad */
+  /* Responsive Grid Adjustments */
   @media (max-width: 1024px) {
     .grid-2 { grid-template-columns: 1fr !important; }
     .holdings-trades-grid { grid-template-columns: 1fr !important; }
   }
   .holdings-trades-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
 
-  /* Redesigned Treemap/Heatmap Container & Tiles */
+  /* Redesigned Treemap/Heatmap Container & Tiles with STRICT Proportional Sizing */
   .treemap-container {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     width: 100%;
-    min-height: 260px;
+    min-height: 280px;
     align-content: flex-start;
+    justify-content: flex-start;
   }
   .treemap-tile {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    padding: 14px;
-    border-radius: 8px;
+    padding: 12px;
+    border-radius: 6px;
     color: #fff;
     font-family: 'DM Mono', monospace;
     box-sizing: border-box;
@@ -57,32 +58,35 @@
     transition: transform 0.2s, filter 0.2s;
     cursor: default;
     overflow: hidden;
+    /* This prevents flexbox from stretching the boxes! */
+    flex: 0 0 auto; 
   }
   .treemap-tile:hover {
-    transform: translateY(-2px);
+    transform: translateY(-4px);
     filter: brightness(1.1);
     z-index: 5;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.25);
   }
   .treemap-header {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: flex-start;
     width: 100%;
   }
   .treemap-sym {
     font-weight: 700;
-    font-size: 16px;
     font-family: 'DM Sans', sans-serif;
     letter-spacing: 0.5px;
+    line-height: 1;
   }
   .treemap-pct {
-    font-size: 13px;
     font-weight: 600;
+    line-height: 1;
   }
   .treemap-footer {
-    font-size: 11px;
-    opacity: 0.9;
+    opacity: 0.95;
     font-family: 'DM Mono', monospace;
+    line-height: 1;
   }
 
   /* Custom Interactive Legend for Pie Chart */
@@ -140,7 +144,7 @@
     </div>
   </div>
 
-  <!-- Pie Chart & Redesigned Heatmap Row -->
+  <!-- Pie Chart & Heatmap Row -->
   <div class="grid-2 mb-24" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
     <div class="card">
       <div class="card-title mb-16">Asset Allocation</div>
@@ -156,7 +160,7 @@
     
     <div class="card">
       <div class="toolbar" style="margin-bottom: 12px;">
-        <div class="card-title">Portfolio Heatmap (Sized by Market Value)</div>
+        <div class="card-title">Portfolio Treemap (Sized strictly by Market Value)</div>
         <div class="time-filters" id="hm-filters">
           <button class="btn-filter" data-period="1M">1M</button>
           <button class="btn-filter" data-period="3M">3M</button>
@@ -325,6 +329,7 @@ let masterChartData = [];
 let currentHoldingsList = []; 
 let currentSortKey = 'val';
 let sortDirectionDesc = true;
+let activeHmPeriod = 'YTD';
 const palette = ['#5b8df6','#4caf88','#c9a84c','#e05c6a','#9b7cf8','#4cc9c9','#f08c4b','#e87dbd','#7dc8e8','#a8d86e'];
 
 const fmtNum = (n) => new Intl.NumberFormat('en-US').format(n);
@@ -376,7 +381,7 @@ async function loadPortfolio() {
     renderTradesTable();
     calculateHistoricalData(holdings, trades);
     renderAllocationPie();
-    renderHeatmap('YTD'); 
+    renderHeatmap(activeHmPeriod); 
     
   } catch (err) {
     document.getElementById('portfolio-body').innerHTML = `<tr><td colspan="7" class="val-red">Error loading data: ${err}</td></tr>`;
@@ -732,6 +737,7 @@ function resetPieSlice() {
 }
 
 function renderHeatmap(period) {
+  activeHmPeriod = period;
   const container = document.getElementById('heatmap-container');
   container.innerHTML = '';
 
@@ -740,11 +746,14 @@ function renderHeatmap(period) {
     return;
   }
   
-  // Sort holdings strictly largest to smallest by Total Market Value
+  // 1. Sort completely largest to smallest
   const sortedHoldings = [...currentHoldingsList].sort((a, b) => b.val - a.val);
   const totalPortfolioValue = sortedHoldings.reduce((sum, h) => sum + h.val, 0);
-  const today = new Date();
   
+  // Find the absolute largest asset value in the portfolio to use as our 100% baseline anchor
+  const maxAssetValue = sortedHoldings[0].val;
+
+  const today = new Date();
   let cutoffStr = '';
   if (period !== 'ALL') {
     let cutoffDate = new Date('1970-01-01');
@@ -781,21 +790,33 @@ function renderHeatmap(period) {
       bgColor = `rgba(224,92,106,${intensity})`;
     }
 
-    // Dynamic scale width & height scaling directly proportional to market asset value percentage
-    const weight = totalPortfolioValue > 0 ? (h.val / totalPortfolioValue) : 0;
-    const widthPct = Math.max(28, weight * 100); 
-
+    // 2. TRUE PROPORTIONAL SIZING
+    // Calculate the size compared to the single largest asset. 
+    // We use Math.sqrt so the AREA of the box scales linearly with the financial value.
+    const sizeRatio = maxAssetValue > 0 ? Math.sqrt(h.val / maxAssetValue) : 0;
+    
+    // Calculate hard pixel values so the browser absolutely cannot stretch or shrink them
+    const boxWidth = Math.max(90, sizeRatio * 280); // Min 90px wide, Max 280px wide
+    const boxHeight = Math.max(75, sizeRatio * 200); // Min 75px high, Max 200px high
+    
+    // Dynamic font sizing so text scales up inside bigger boxes
+    const symFontSize = Math.max(12, sizeRatio * 22);
+    const pctFontSize = Math.max(10, sizeRatio * 15);
+    const valFontSize = Math.max(9, sizeRatio * 12);
+    
     const tooltipBase = `${sym}: ${fmtPct(pctChange)} ${period === 'ALL' ? 'from purchase' : 'over ' + period}`;
     const tooltipExtra = period === 'ALL' ? ` | Avg Cost: ${fmtMoney(h.avgCost)}` : '';
+    const portfolioPct = totalPortfolioValue > 0 ? ((h.val / totalPortfolioValue) * 100).toFixed(1) : 0;
     
+    // Using inline 'width' and 'height' overriding flex completely
     container.innerHTML += `
-      <div class="treemap-tile" style="background: ${bgColor}; width: calc(${widthPct}% - 6px); flex-grow: ${Math.max(1, Math.round(weight * 20))};" title="${tooltipBase}${tooltipExtra}">
+      <div class="treemap-tile" style="background: ${bgColor}; width: ${boxWidth}px; height: ${boxHeight}px;" title="${tooltipBase}${tooltipExtra}">
         <div class="treemap-header">
-          <span class="treemap-sym">${sym}</span>
-          <span class="treemap-pct">${fmtPct(pctChange)}</span>
+          <span class="treemap-sym" style="font-size: ${symFontSize}px;">${sym}</span>
+          <span class="treemap-pct" style="font-size: ${pctFontSize}px;">${fmtPct(pctChange)}</span>
         </div>
-        <div class="treemap-footer">
-          ${fmtMoney(h.val)} (${(weight * 100).toFixed(1)}%)
+        <div class="treemap-footer" style="font-size: ${valFontSize}px;">
+          ${fmtMoney(h.val)} (${portfolioPct}%)
         </div>
       </div>
     `;
