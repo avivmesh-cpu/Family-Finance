@@ -35,9 +35,9 @@
   }
   .holdings-trades-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
 
-  /* Heatmap Styles - Proportional Sizing sorted largest to smallest */
-  .heatmap-flex { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; min-height: 200px; }
-  .hm-block { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px 8px; border-radius: 6px; color: #fff; font-family: 'DM Mono', monospace; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1); transition: transform 0.2s; min-height: 90px; flex-grow: 1; cursor: default; overflow: hidden; }
+  /* Heatmap Styles - Explicit sizing via flex-basis and flex-grow */
+  .heatmap-flex { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; min-height: 220px; }
+  .hm-block { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px 8px; border-radius: 6px; color: #fff; font-family: 'DM Mono', monospace; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1); transition: transform 0.2s; min-height: 95px; cursor: default; overflow: hidden; box-sizing: border-box; }
   .hm-block:hover { transform: scale(1.02); z-index: 10; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
   .hm-sym { font-weight: 700; font-size: 15px; font-family: 'DM Sans', sans-serif; }
   .hm-pct { font-size: 12px; margin-top: 4px; }
@@ -651,14 +651,13 @@ function renderAllocationPie() {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { display: false }, // Using custom interactive HTML legend below
+        legend: { display: false }, 
         tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + fmtMoney(ctx.parsed) + ' (' + ((ctx.parsed/totalVal)*100).toFixed(1) + '%)' } }
       },
       cutout: '65%'
     }
   });
 
-  // Render Custom Interactive Legend
   const legendContainer = document.getElementById('pie-custom-legend');
   legendContainer.innerHTML = '';
   
@@ -699,7 +698,7 @@ function renderHeatmap(period) {
     return;
   }
   
-  // Sort holdings from largest to smallest by Total Market Value
+  // Explicitly sort holdings from largest to smallest by Total Market Value so largest asset is processed first
   const sortedHoldings = [...currentHoldingsList].sort((a, b) => b.val - a.val);
   const totalPortfolioValue = sortedHoldings.reduce((sum, h) => sum + h.val, 0);
   const today = new Date();
@@ -740,15 +739,15 @@ function renderHeatmap(period) {
       bgColor = `rgba(224,92,106,${intensity})`;
     }
 
-    // Proportional width sized strictly by total portfolio asset value share
+    // Proportional flex-basis styling ensuring the biggest asset stretches the widest block width
     const weight = h.val / totalPortfolioValue;
-    const widthPct = Math.max(14, weight * 100); 
+    const flexBasisPct = Math.max(20, weight * 100);
 
     const tooltipBase = `${sym}: ${fmtPct(pctChange)} ${period === 'ALL' ? 'from purchase' : 'over ' + period}`;
     const tooltipExtra = period === 'ALL' ? ` | Avg Cost: ${fmtMoney(h.avgCost)}` : '';
     
     container.innerHTML += `
-      <div class="hm-block" style="background: ${bgColor}; width: calc(${widthPct}% - 6px);" title="${tooltipBase}${tooltipExtra}">
+      <div class="hm-block" style="background: ${bgColor}; flex-basis: calc(${flexBasisPct}% - 6px); flex-grow: ${Math.round(weight * 10)};" title="${tooltipBase}${tooltipExtra}">
         <div class="hm-sym">${sym}</div>
         <div class="hm-pct">${fmtPct(pctChange)}</div>
         <div class="hm-val">${fmtMoney(h.val)}</div>
