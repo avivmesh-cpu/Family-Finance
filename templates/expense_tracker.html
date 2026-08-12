@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Expense Tracker{% endblock %}
-{% block page_title %}Expense Tracker & Cash Flow{% endblock %}
-{% block page_subtitle %}Track every individual income and expense item with full descriptions{% endblock %}
+{% block title %}Expense Analysis & Timeline{% endblock %}
+{% block page_title %}Expense Analysis & Timeline{% endblock %}
+{% block page_subtitle %}Track and analyze your expenses across multiple months{% endblock %}
 
 {% block content %}
 <style>
@@ -11,14 +11,19 @@
   .tx-table td { padding: 10px; border-bottom: 1px solid var(--border2); text-align: left; }
   .tx-table td:nth-child(4), .tx-table td:nth-child(5) { text-align: right; font-family: 'DM Mono', monospace; }
   
-  .table-wrap { overflow-x: auto; max-height: 450px; overflow-y: auto; }
+  .table-wrap { overflow-x: auto; max-height: 400px; overflow-y: auto; }
   
   .badge-income { background: rgba(76,175,136,0.15); color: var(--green); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
   .badge-expense { background: rgba(224,92,106,0.15); color: var(--red); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
 
+  .analysis-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px; }
+  @media (max-width: 1024px) { .analysis-grid { grid-template-columns: 1fr; } }
+
+  .insight-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border2); font-size: 13px; }
+  .insight-label { color: var(--text3); }
+  .insight-val { font-family: 'DM Mono', monospace; font-weight: 600; color: var(--text); }
+
   .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; flex-wrap: wrap; gap: 12px; }
-  .filter-bar { display: flex; gap: 8px; align-items: center; }
-  .filter-bar select { padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600; }
 
   .skeleton {
     background: linear-gradient(90deg, var(--bg3) 25%, var(--border2) 50%, var(--bg3) 75%);
@@ -45,28 +50,34 @@
 
   <!-- KPIs -->
   <div class="kpi-grid" id="cashflow-kpis">
-    <div class="kpi-card green"><div class="kpi-label">Total Income</div><div class="kpi-value green skeleton" id="kpi-income">₪0</div></div>
-    <div class="kpi-card red"><div class="kpi-label">Total Expenses</div><div class="kpi-value red skeleton" id="kpi-expenses">₪0</div></div>
-    <div class="kpi-card blue"><div class="kpi-label">Net Savings</div><div class="kpi-value blue skeleton" id="kpi-savings">₪0</div></div>
-    <div class="kpi-card"><div class="kpi-label">Savings Rate</div><div class="kpi-value skeleton" id="kpi-rate">0%</div></div>
+    <div class="kpi-card red"><div class="kpi-label">Total Expenses (All Time)</div><div class="kpi-value red skeleton" id="kpi-total-exp">₪0</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">Monthly Average Spend</div><div class="kpi-value blue skeleton" id="kpi-avg-exp">₪0</div></div>
+    <div class="kpi-card"><div class="kpi-label">Highest Expense Month</div><div class="kpi-value skeleton" id="kpi-peak-month">-</div></div>
+  </div>
+
+  <!-- Chart & Analysis Row -->
+  <div class="analysis-grid">
+    <div class="card">
+      <div class="card-title mb-16">Expenses Over Time (Multi-Month Trend)</div>
+      <div style="height: 280px; position: relative;">
+        <canvas id="expense-timeline-chart"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title mb-16">Spending Insights</div>
+      <div id="insights-container">
+        <div class="insight-item"><span class="insight-label">Months Tracked</span><span class="insight-val skeleton">--</span></div>
+        <div class="insight-item"><span class="insight-label">Top Expense Category</span><span class="insight-val skeleton">--</span></div>
+        <div class="insight-item"><span class="insight-label">Lowest Spend Month</span><span class="insight-val skeleton">--</span></div>
+      </div>
+    </div>
   </div>
 
   <!-- Transactions Table Section -->
   <div class="card">
     <div class="toolbar">
-      <div class="filter-bar">
-        <div style="font-weight: 600; font-size: 15px; margin-right: 8px;">Filter:</div>
-        <select id="filter-year" onchange="loadTransactions()">
-          <option value="">All Years</option>
-        </select>
-        <select id="filter-month" onchange="loadTransactions()">
-          <option value="">All Months</option>
-          <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
-          <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
-          <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
-          <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
-        </select>
-      </div>
+      <div style="font-weight: 600; font-size: 15px;">Itemized Transaction History</div>
       <button class="btn btn-primary btn-sm" onclick="openTxModal()">+ Add Expense / Income</button>
     </div>
 
@@ -141,39 +152,23 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-let transactionsData = [];
+let allTransactions = [];
+let timelineChart = null;
 
 const fmtMoney = (n) => '₪' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(n);
 
 async function initPage() {
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  
-  const yearSelect = document.getElementById('filter-year');
-  for (let y = currentYear; y >= currentYear - 5; y--) {
-    yearSelect.innerHTML += `<option value="${y}">${y}</option>`;
-  }
-  yearSelect.value = currentYear;
-  document.getElementById('filter-month').value = now.getMonth() + 1;
-
   await loadTransactions();
 }
 
 async function loadTransactions() {
-  const yr = document.getElementById('filter-year').value;
-  const mo = document.getElementById('filter-month').value;
-  
-  let url = '/api/transactions';
-  let params = [];
-  if (yr) params.push(`year=${yr}`);
-  if (mo) params.push(`month=${mo}`);
-  if (params.length) url += '?' + params.join('&');
-
   try {
-    transactionsData = await FF.get(url);
+    // Fetch all transactions without filters to analyze across all months
+    allTransactions = await FF.get('/api/transactions');
     renderTable();
-    updateKPIs();
+    processAnalytics();
   } catch (err) {
     console.error('Failed to load transactions', err);
   }
@@ -183,12 +178,19 @@ function renderTable() {
   const tbody = document.getElementById('tx-table-body');
   tbody.innerHTML = '';
 
-  if (!transactionsData || !transactionsData.length) {
+  if (!allTransactions || !allTransactions.length) {
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text3); padding:20px;">No transactions found. Click "+ Add Expense / Income" to add one.</td></tr>';
     return;
   }
 
-  transactionsData.forEach(t => {
+  // Sort descending by period
+  const sorted = [...allTransactions].sort((a,b) => {
+    const periodA = a.year * 12 + a.month;
+    const periodB = b.year * 12 + b.month;
+    return periodB - periodA;
+  });
+
+  sorted.forEach(t => {
     const isIncome = t.type.startsWith('income');
     const badge = isIncome ? `<span class="badge-income">Income</span>` : `<span class="badge-expense">${t.type}</span>`;
     
@@ -204,34 +206,102 @@ function renderTable() {
   });
 }
 
-function updateKPIs() {
-  let income = 0;
-  let expenses = 0;
+function processAnalytics() {
+  let monthlyExpenses = {};
+  let categoryTotals = {};
+  let totalExpensesAllTime = 0;
 
-  transactionsData.forEach(t => {
+  allTransactions.forEach(t => {
     const amt = parseFloat(t.amount) || 0;
-    if (t.type.startsWith('income')) {
-      income += amt;
-    } else {
-      expenses += amt;
+    if (!t.type.startsWith('income')) {
+      totalExpensesAllTime += amt;
+      const monthKey = `${t.year}-${String(t.month).padStart(2, '0')}`;
+      monthlyExpenses[monthKey] = (monthlyExpenses[monthKey] || 0) + amt;
+      categoryTotals[t.type] = (categoryTotals[t.type] || 0) + amt;
     }
   });
 
-  const netSavings = income - expenses;
-  const savingsRate = income > 0 ? (netSavings / income) * 100 : 0;
+  const months = Object.keys(monthlyExpenses).sort();
+  const numMonths = months.length;
 
-  document.getElementById('kpi-income').textContent = fmtMoney(income);
-  document.getElementById('kpi-expenses').textContent = fmtMoney(expenses);
-  
-  const savingsEl = document.getElementById('kpi-savings');
-  savingsEl.textContent = fmtMoney(netSavings);
-  savingsEl.className = 'kpi-value ' + (netSavings >= 0 ? 'blue' : 'val-red');
+  if (numMonths === 0) {
+    document.getElementById('kpi-total-exp').textContent = fmtMoney(0);
+    document.getElementById('kpi-avg-exp').textContent = fmtMoney(0);
+    document.getElementById('kpi-peak-month').textContent = '-';
+    document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
+    return;
+  }
 
-  const rateEl = document.getElementById('kpi-rate');
-  rateEl.textContent = savingsRate.toFixed(1) + '%';
-  rateEl.className = 'kpi-value ' + (savingsRate >= 0 ? 'val-green' : 'val-red');
+  const avgMonthly = totalExpensesAllTime / numMonths;
 
+  // Find peak and lowest months
+  let peakMonth = months[0];
+  let lowestMonth = months[0];
+  months.forEach(m => {
+    if (monthlyExpenses[m] > monthlyExpenses[peakMonth]) peakMonth = m;
+    if (monthlyExpenses[m] < monthlyExpenses[lowestMonth]) lowestMonth = m;
+  });
+
+  // Find top category
+  let topCategory = Object.keys(categoryTotals).reduce((a, b) => categoryTotals[a] > categoryTotals[b] ? a : b, 'None');
+
+  // Update KPIs
+  document.getElementById('kpi-total-exp').textContent = fmtMoney(totalExpensesAllTime);
+  document.getElementById('kpi-avg-exp').textContent = fmtMoney(avgMonthly);
+  document.getElementById('kpi-peak-month').textContent = `${peakMonth} (${fmtMoney(monthlyExpenses[peakMonth])})`;
+
+  // Update Insights Box
+  const insightsContainer = document.getElementById('insights-container');
+  insightsContainer.innerHTML = `
+    <div class="insight-item"><span class="insight-label">Months Tracked</span><span class="insight-val">${numMonths}</span></div>
+    <div class="insight-item"><span class="insight-label">Top Expense Category</span><span class="insight-val">${topCategory} (${fmtMoney(categoryTotals[topCategory] || 0)})</span></div>
+    <div class="insight-item"><span class="insight-label">Lowest Spend Month</span><span class="insight-val">${lowestMonth} (${fmtMoney(monthlyExpenses[lowestMonth])})</span></div>
+  `;
+
+  renderTimelineChart(months, months.map(m => monthlyExpenses[m]));
   document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
+}
+
+function renderTimelineChart(labels, data) {
+  const ctx = document.getElementById('expense-timeline-chart').getContext('2d');
+  if (timelineChart) {
+    timelineChart.data.labels = labels;
+    timelineChart.data.datasets[0].data = data;
+    timelineChart.update();
+  } else {
+    timelineChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Monthly Expenses',
+          data: data,
+          borderColor: '#e05c6a',
+          backgroundColor: 'rgba(224,92,106,0.1)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.2,
+          pointRadius: 4,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#e05c6a'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: { label: ctx => ' Expenses: ' + fmtMoney(ctx.parsed.y) }
+          }
+        },
+        scales: { 
+          y: { ticks: { callback: v => '₪' + v.toLocaleString() } },
+          x: { grid: { display: false } }
+        }
+      }
+    });
+  }
 }
 
 function openTxModal() {
