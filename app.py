@@ -173,7 +173,7 @@ def debug_stocks():
 def debug_yahoo(symbol):
     import traceback
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
         'Origin': 'https://finance.yahoo.com',
@@ -426,7 +426,7 @@ def _yahoo(sym):
     if not sym:
         raise Exception('Empty symbol')
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
         'Origin': 'https://finance.yahoo.com',
@@ -451,7 +451,6 @@ def _yahoo(sym):
             continue
     raise Exception(f'No price for {sym}: {last_err}')
 
-# MUST be before /api/stocks/<int:sid> routes
 @app.route('/api/stocks/prices', methods=['GET'])
 @auth_required
 def stock_prices_list():
@@ -472,7 +471,6 @@ def stock_prices_list():
             
     return jsonify(prices)
 
-# Alternative URL with no routing conflict
 @app.route('/api/stock-prices', methods=['GET'])
 @auth_required
 def stock_prices_alt():
@@ -522,7 +520,7 @@ def get_stock_history():
     """Return daily closing prices for all held symbols from earliest purchase date to today."""
     from datetime import date as dt, timedelta
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/json',
         'Referer': 'https://finance.yahoo.com',
     }
@@ -565,7 +563,6 @@ def get_stock_history():
 
     return jsonify({'series': series, 'holdings': holdings})
 
-# ── Daughter/Romi ─────────────────────────────────────────────────
 # ── Stock Trades (realized sells) ────────────────────────────────
 @app.route('/api/stock-trades', methods=['GET'])
 @auth_required
@@ -633,8 +630,8 @@ def delete_stock_trade(tid):
 @app.route('/api/stocks/ytd', methods=['GET'])
 @auth_required
 def get_stocks_ytd():
-    """Return YTD performance: portfolio vs S&P 500 (SPY)."""
-    from datetime import date as dt
+    """Return YTD performance and True Money-Weighted Return (XIRR)."""
+    from datetime import date as dt, datetime
     today = dt.today()
     jan1 = dt(today.year, 1, 1)
     epoch = dt(1970, 1, 1)
@@ -642,7 +639,7 @@ def get_stocks_ytd():
     p2 = int((today - epoch).days) * 86400 + 86400
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/json',
         'Referer': 'https://finance.yahoo.com',
     }
@@ -659,62 +656,112 @@ def get_stocks_ytd():
                 continue
         return None
 
-    # S&P 500 YTD via SPY
+    # Benchmark YTD
     sp500_ytd = ytd_pct('SPY')
 
-    # Portfolio YTD: weighted by current value
+    # Pull all historical data
     conn = get_db()
-    holdings = q(conn, 'SELECT symbol, quantity, purchase_price FROM stock_holding')
+    holdings = q(conn, 'SELECT symbol, quantity, purchase_price, purchase_date FROM stock_holding')
+    trades = q(conn, 'SELECT symbol, shares, sell_price, trade_date, cost_basis FROM stock_trade')
     close_db(conn)
 
-    symbols = list(set(h['symbol'] for h in holdings if h['symbol']))
+    symbols = list(set([h['symbol'] for h in holdings] + [t['symbol'] for t in trades]))
     sym_ytd = {}
     sym_price = {}
-    for sym in symbols:
-        pct = ytd_pct(sym)
-        sym_ytd[sym] = pct
-        # Get current price for weighting
+    
+    # Fetch current prices concurrently for speed
+    def fetch_meta(sym):
         try:
             url = f'https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d'
-            data = req_lib.get(url, timeout=8, headers=headers).json()['chart']['result'][0]
+            data = req_lib.get(url, timeout=5, headers=headers).json()['chart']['result'][0]
             closes = [c for c in data['indicators']['quote'][0].get('close', []) if c is not None]
-            sym_price[sym] = closes[-1] if closes else data['meta'].get('regularMarketPrice', 0)
+            price = closes[-1] if closes else data['meta'].get('regularMarketPrice', 0)
+            return sym, price
         except Exception:
-            sym_price[sym] = 0
+            return sym, 0
 
-    # Weighted portfolio YTD
-    total_val = sum((sym_price.get(h['symbol'], 0) or float(h['purchase_price'])) * float(h['quantity'])
-                    for h in holdings)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        for sym, price in executor.map(fetch_meta, symbols):
+            sym_price[sym] = price
+
+    for sym in list(set(h['symbol'] for h in holdings)):
+        sym_ytd[sym] = ytd_pct(sym)
+
+    # 1. Weighted Portfolio YTD
+    total_val = sum((sym_price.get(h['symbol'], 0) or float(h['purchase_price'])) * float(h['quantity']) for h in holdings)
     portfolio_ytd = None
-    if total_val > 0 and any(sym_ytd.get(h['symbol']) is not None for h in holdings):
-        weighted = 0
-        for h in holdings:
-            sym = h['symbol']
-            val = (sym_price.get(sym, 0) or float(h['purchase_price'])) * float(h['quantity'])
-            pct = sym_ytd.get(sym)
-            if pct is not None:
-                weighted += (val / total_val) * pct
+    if total_val > 0:
+        weighted = sum(((sym_price.get(h['symbol'], 0) or float(h['purchase_price'])) * float(h['quantity']) / total_val) * (sym_ytd.get(h['symbol']) or 0) for h in holdings)
         portfolio_ytd = round(weighted, 2)
 
-    # Include realized gains from sells this year
-    conn2 = get_db()
-    trades = q(conn2, 'SELECT * FROM stock_trade WHERE trade_date >= ?', (f'{today.year}-01-01',))
-    close_db(conn2)
-    realized_pnl = sum((float(t['sell_price']) - float(t['cost_basis'])) * float(t['shares']) for t in trades)
-    realized_cost = sum(float(t['cost_basis']) * float(t['shares']) for t in trades)
+    # 2. XIRR (Money-Weighted Return) Engine
+    cash_flows = []
+    
+    def safe_date(d_str):
+        try: return datetime.strptime(d_str, '%Y-%m-%d').date()
+        except Exception: return jan1
+        
+    # Outflows (Historical Purchases)
+    for h in holdings:
+        val = float(h['purchase_price']) * float(h['quantity'])
+        if val > 0:
+            cash_flows.append((safe_date(h['purchase_date']), -val))
+            
+    # Inflows (Realized Sales)
+    realized_pnl = 0
+    realized_cost = 0
+    for t in trades:
+        val = float(t['sell_price']) * float(t['shares'])
+        if val > 0:
+            cash_flows.append((safe_date(t['trade_date']), val))
+        if safe_date(t['trade_date']).year == today.year:
+            realized_pnl += (float(t['sell_price']) - float(t['cost_basis'])) * float(t['shares'])
+            realized_cost += float(t['cost_basis']) * float(t['shares'])
+            
+    # Inflow (Unrealized Current Value of Portfolio)
+    if total_val > 0:
+        cash_flows.append((today, total_val))
+
+    # Calculate XIRR using the Secant Method
+    portfolio_xirr = 0.0
+    if cash_flows:
+        cash_flows.sort(key=lambda x: x[0])
+        d0 = cash_flows[0][0]
+        amounts = [cf[1] for cf in cash_flows]
+        
+        # We can only calculate XIRR if there is at least one negative and one positive cash flow
+        if min(amounts) < 0 and max(amounts) > 0:
+            def npv(rate):
+                if rate <= -1.0: return float('inf')
+                return sum(cf / (1.0 + rate)**((d - d0).days / 365.25) for d, cf in cash_flows)
+            r0, r1 = 0.0, 0.1
+            for _ in range(50):
+                npv0 = npv(r0)
+                npv1 = npv(r1)
+                if abs(npv1) < 1e-4:
+                    portfolio_xirr = round(r1 * 100, 2)
+                    break
+                if npv1 == npv0: break
+                try:
+                    r2 = r1 - npv1 * (r1 - r0) / (npv1 - npv0)
+                except ZeroDivisionError:
+                    break
+                r0, r1 = r1, r2
 
     return jsonify({
         'portfolio_ytd': portfolio_ytd,
+        'portfolio_xirr': portfolio_xirr,
         'sp500_ytd': sp500_ytd,
         'beating': (portfolio_ytd is not None and sp500_ytd is not None and portfolio_ytd > sp500_ytd),
         'diff': round(portfolio_ytd - sp500_ytd, 2) if portfolio_ytd is not None and sp500_ytd is not None else None,
         'year': today.year,
-        'per_symbol': {sym: sym_ytd[sym] for sym in sym_ytd},
+        'per_symbol': {sym: sym_ytd.get(sym) for sym in sym_ytd},
         'realized_pnl': round(realized_pnl, 2),
         'realized_cost': round(realized_cost, 2),
-        'realized_trades': len(trades)
+        'realized_trades_ytd': len([t for t in trades if safe_date(t['trade_date']).year == today.year])
     })
 
+# ── Daughter/Romi ─────────────────────────────────────────────────
 @app.route('/api/daughter', methods=['GET'])
 @auth_required
 def get_daughter():
@@ -742,7 +789,7 @@ def add_daughter_entry():
 def fetch_ivv_prices():
     import calendar; from datetime import date as dt
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
         'Origin': 'https://finance.yahoo.com',
@@ -835,7 +882,7 @@ def auto_accumulate():
     close_db(conn)
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/json',
         'Referer': 'https://finance.yahoo.com',
     }
