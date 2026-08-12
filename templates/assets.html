@@ -1,295 +1,344 @@
 {% extends "base.html" %}
 {% block title %}Total Assets{% endblock %}
-{% block page_title %}Total Assets{% endblock %}
-{% block page_subtitle %}Monthly balances across all accounts{% endblock %}
+{% block page_title %}Assets & Net Worth{% endblock %}
+{% block page_subtitle %}Track your account balances, asset allocations, and net worth history over time{% endblock %}
 
 {% block content %}
+<style>
+  .asset-table { width: 100%; border-collapse: collapse; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); }
+  .asset-table th { background: var(--bg3); border-bottom: 1px solid var(--border2); text-align: right; padding: 10px; font-weight: 600; color: var(--text2); }
+  .asset-table th:first-child { text-align: left; position: sticky; left: 0; z-index: 3; background: var(--bg3); }
+  .asset-table td { padding: 10px; border-bottom: 1px solid var(--border2); text-align: right; }
+  
+  .table-wrap { overflow-x: auto; margin-bottom: 24px; }
+  .asset-table td:first-child { position: sticky; left: 0; z-index: 2; background: var(--surface); border-right: 1px solid var(--border2); font-weight: 500; }
+  .asset-table tr:hover td:first-child { background: var(--bg2); }
+
+  .skeleton {
+    background: linear-gradient(90deg, var(--bg3) 25%, var(--border2) 50%, var(--bg3) 75%);
+    background-size: 200% 100%;
+    animation: skeletonLoading 1.5s infinite;
+    border-radius: 4px;
+    color: transparent !important;
+    user-select: none;
+  }
+  @keyframes skeletonLoading {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .currency-badge { background: var(--bg3); border: 1px solid var(--border2); padding: 2px 6px; border-radius: 4px; font-size: 10px; font-family: 'DM Mono', monospace; color: var(--text2); }
+  
+  .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 1000; }
+  .modal-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+  .modal-header { font-size: 18px; font-weight: 600; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+  .form-group-custom { margin-bottom: 12px; }
+  .form-group-custom label { display: block; font-size: 12px; color: var(--text3); margin-bottom: 4px; }
+  .form-group-custom input, .form-group-custom select { width: 100%; padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Mono', monospace; }
+</style>
+
 <div class="page-body">
-  <div class="month-bar">
-    <label>Month:</label>
-    <input type="month" id="month-picker" class="month-input" />
-    <button class="btn btn-primary btn-sm" id="load-btn">Load</button>
-    <div class="spacer"></div>
-    <button id="save-btn" class="btn btn-sm" onclick="saveAll()" style="background:var(--green);color:#000;font-weight:600">✓ Save All</button>
+
+  <!-- KPIs -->
+  <div class="kpi-grid" id="asset-kpis">
+    <div class="kpi-card blue"><div class="kpi-label">Current Net Worth (ILS)</div><div class="kpi-value blue skeleton" id="kpi-networth">Loading...</div></div>
+    <div class="kpi-card"><div class="kpi-label">Total Liquid Assets</div><div class="kpi-value skeleton" id="kpi-liquid">Loading...</div></div>
+    <div class="kpi-card"><div class="kpi-label">Live USD/ILS Rate</div><div class="kpi-value skeleton" id="kpi-fx">Loading...</div></div>
   </div>
 
-  <div class="kpi-grid">
-    <div class="kpi-card green"><div class="kpi-label">Total Balance</div><div class="kpi-value green" id="kpi-total">&#8362;0</div></div>
-    <div class="kpi-card"><div class="kpi-label">Bank Accounts</div><div class="kpi-value" id="kpi-bank">&#8362;0</div></div>
-    <div class="kpi-card blue"><div class="kpi-label">Stock Accounts</div><div class="kpi-value blue" id="kpi-stocks">&#8362;0</div></div>
-    <div class="kpi-card purple"><div class="kpi-label">Education Fund</div><div class="kpi-value" style="color:var(--purple)" id="kpi-edu">&#8362;0</div></div>
-    <div class="kpi-card"><div class="kpi-label">Other</div><div class="kpi-value" id="kpi-other">&#8362;0</div></div>
-  </div>
-
-  <div class="grid-2 mb-24">
-    <div class="card"><div class="card-title mb-16">Asset Allocation</div><div class="chart-wrap"><canvas id="alloc-chart"></canvas></div></div>
-    <div class="card"><div class="card-title mb-16">Historical Growth</div><div class="chart-wrap"><canvas id="hist-chart"></canvas></div></div>
-  </div>
-
-  <div class="card">
-    <div class="flex-between mb-16">
+  <!-- Main Net Worth Trend Chart -->
+  <div class="card mb-24">
+    <div class="toolbar">
       <div>
-        <div class="card-title">Account Balances</div>
-        <div class="card-subtitle" id="tbl-subtitle">Enter balances for this month</div>
+        <div class="card-title">Net Worth Growth Over Time</div>
+        <div class="card-subtitle">Monthly breakdown of all asset accounts combined</div>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="showAddAccount()">+ Add Account</button>
+    </div>
+    <div style="height: 320px; position: relative;">
+      <canvas id="networth-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Asset Table & Accounts Section -->
+  <div class="card">
+    <div class="toolbar">
+      <div>
+        <div class="card-title">Monthly Asset Balances</div>
+        <div class="card-subtitle">Manage historical snapshots and accounts</div>
+      </div>
+      <div style="display:flex; gap: 8px;">
+        <button class="btn btn-ghost btn-sm" onclick="openAccountModal()">+ New Account</button>
+        <button class="btn btn-primary btn-sm" onclick="openSnapshotModal()">+ Update Snapshot</button>
+      </div>
     </div>
 
-    <!-- Add account form (hidden by default) -->
-    <div id="add-account-form" style="display:none;background:var(--bg3);border-radius:8px;padding:16px;margin-bottom:16px">
-      <div style="font-size:13px;font-weight:500;margin-bottom:12px;color:var(--text2)">New Account — will appear in this and all future months</div>
-      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-        <div class="form-group" style="flex:2;min-width:160px">
-          <label class="form-label">Account Name</label>
-          <input type="text" id="new-acc-name" class="form-input" placeholder="e.g. Bank Leumi" />
-        </div>
-        <div class="form-group" style="flex:1;min-width:130px">
-          <label class="form-label">Type</label>
-          <select id="new-acc-type" class="form-input">
-            <option value="bank">Bank</option>
-            <option value="stocks">Stocks</option>
-            <option value="education">Education Fund</option>
-            <option value="other">Other</option>
-          </select>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-primary btn-sm" onclick="doAddAccount()">Add</button>
-          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('add-account-form').style.display='none'">Cancel</button>
-        </div>
-      </div>
+    <div class="table-wrap">
+      <table class="asset-table">
+        <thead>
+          <tr id="asset-table-head">
+            <th>Account Name</th>
+          </tr>
+        </thead>
+        <tbody id="asset-table-body">
+          <tr><td><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
+        </tbody>
+      </table>
     </div>
-    <table style="width:100%">
-      <thead>
-        <tr>
-          <th>Account</th>
-          <th style="width:160px">Type</th>
-          <th style="width:200px;text-align:right">Balance (&#8362;)</th>
-        </tr>
-      </thead>
-      <tbody id="assets-tbody"></tbody>
-      <tfoot><tr>
-        <td colspan="2" style="padding:10px 14px;font-size:12px;color:var(--text3)">Total</td>
-        <td style="text-align:right;padding:10px 14px;font-family:'DM Mono',monospace;font-weight:500;color:var(--green)" id="assets-total">&#8362;0</td>
-      </tr></tfoot>
-    </table>
+  </div>
+
+</div>
+
+<!-- Modal: Add New Account type -->
+<div class="modal-overlay" id="account-modal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span>Add New Account</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeAccountModal()">✕</button>
+    </div>
+    <form onsubmit="handleAccountSubmit(event)">
+      <div class="form-group-custom">
+        <label>Account Name</label>
+        <input type="text" id="acc-name" placeholder="e.g., US Brokerage (USD)" required />
+      </div>
+      <div class="form-group-custom">
+        <label>Category Type</label>
+        <select id="acc-type">
+          <option value="liquid">Liquid / Cash</option>
+          <option value="investment">Investment / Stocks</option>
+          <option value="pension">Pension / Long-term</option>
+          <option value="property">Real Estate / Other</option>
+        </select>
+      </div>
+      <div class="form-group-custom">
+        <label>Currency</label>
+        <select id="acc-currency">
+          <option value="ILS">ILS (₪)</option>
+          <option value="USD">USD ($)</option>
+        </select>
+      </div>
+      <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="btn btn-ghost" onclick="closeAccountModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Account</button>
+      </div>
+    </form>
   </div>
 </div>
+
+<!-- Modal: Quick Update Balance Snapshot -->
+<div class="modal-overlay" id="snapshot-modal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span>Update Monthly Balance</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeSnapshotModal()">✕</button>
+    </div>
+    <form onsubmit="handleSnapshotSubmit(event)">
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div class="form-group-custom">
+          <label>Year</label>
+          <input type="number" id="snap-year" required />
+        </div>
+        <div class="form-group-custom">
+          <label>Month</label>
+          <input type="number" id="snap-month" min="1" max="12" required />
+        </div>
+      </div>
+      <div class="form-group-custom">
+        <label>Account</label>
+        <select id="snap-account" required></select>
+      </div>
+      <div class="form-group-custom">
+        <label>Balance (in Account Currency)</label>
+        <input type="number" id="snap-balance" step="any" placeholder="0.00" required />
+      </div>
+      <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="btn btn-ghost" onclick="closeSnapshotModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Balance</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-let CY, CM, allocChart = null, histChart = null;
+let currentFXRate = 3.65; // Default fallback
+let historyData = {};
+let assetAccounts = [];
+let nwChart = null;
 
-// These 6 accounts always appear every month
-const FIXED_ACCOUNTS = [
-  { name: 'Bank Hapoalim',            type: 'bank'      },
-  { name: 'Bank Mizrachi',            type: 'bank'      },
-  { name: 'IBI',                      type: 'stocks'    },
-  { name: 'Education fund - MTRX',    type: 'education' },
-  { name: 'Education fund - Symetrium', type: 'education' },
-  { name: 'Education fund - Get sat', type: 'education' },
-];
+const fmtMoney = (n) => '₪' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(n);
 
-const TYPE_LABELS = { bank: 'Bank', stocks: 'Stocks', education: 'Education Fund', other: 'Other' };
+async function loadAssetsData() {
+  try {
+    // Fetch FX rate and asset history in parallel
+    const [fxRes, historyRes] = await Promise.all([
+      FF.get('/api/daughter/fetch-prices'),
+      FF.get('/api/assets/history')
+    ]);
 
-function getYM() {
-  const [y, m] = document.getElementById('month-picker').value.split('-');
-  return { year: +y, month: +m };
-}
-
-async function loadData() {
-  const { year, month } = getYM();
-  CY = year; CM = month;
-  document.getElementById('tbl-subtitle').textContent = 'Balances for ' + FF.monthLabel(year, month);
-
-  // Fetch saved balances for this month
-  const saved = await FF.get('/api/assets?year=' + year + '&month=' + month);
-
-  // Build display list: always show all 6 fixed accounts
-  // Use saved balance if exists, otherwise 0
-  const displayRows = FIXED_ACCOUNTS.map(fa => {
-    const existing = saved.find(s => s.account_name === fa.name);
-    return {
-      id:           existing ? existing.id   : null,
-      account_name: fa.name,
-      account_type: fa.type,
-      balance:      existing ? existing.balance : 0,
-      isNew:        !existing
-    };
-  });
-
-  // Also add any extra accounts the user added that aren't in FIXED_ACCOUNTS
-  saved.forEach(s => {
-    if (!FIXED_ACCOUNTS.some(fa => fa.name === s.account_name)) {
-      displayRows.push({ id: s.id, account_name: s.account_name, account_type: s.account_type, balance: s.balance, isNew: false });
+    if (fxRes && fxRes.usd_ils_rate) {
+      currentFXRate = fxRes.usd_ils_rate;
     }
+    document.getElementById('kpi-fx').textContent = '₪' + currentFXRate.toFixed(2);
+
+    historyData = historyRes || {};
+    renderAssetsTable();
+    renderNetWorthChart();
+    
+    document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
+  } catch (err) {
+    console.error('Failed to load asset data', err);
+  }
+}
+
+function renderAssetsTable() {
+  const headRow = document.getElementById('asset-table-head');
+  const tbody = document.getElementById('asset-table-body');
+  
+  const months = Object.keys(historyData).sort();
+  if (!months.length) {
+    headRow.innerHTML = '<th>Account Name</th><th>Total</th>';
+    tbody.innerHTML = '<tr><td colspan="2" style="text-align:center; color:var(--text3); padding:20px;">No asset records found. Click "+ Update Snapshot" to begin.</td></tr>';
+    return;
+  }
+
+  // Extract unique accounts across all months
+  const accountsSet = new Set();
+  assetAccounts = [];
+  months.forEach(m => {
+    Object.keys(historyData[m]).forEach(acc => accountsSet.add(acc));
+  });
+  assetAccounts = Array.from(accountsSet);
+
+  // Build Table Headers (Months)
+  headRow.innerHTML = '<th>Account Name</th>';
+  months.forEach(m => {
+    headRow.innerHTML += `<th>${m}</th>`;
   });
 
-  buildTable(displayRows);
-  updateKPIs(displayRows);
-  buildAllocChart(displayRows);
-  await buildHistChart();
-}
+  // Build Table Rows (Accounts)
+  tbody.innerHTML = '';
+  let latestNetWorth = 0;
+  let liquidTotal = 0;
 
-function buildTable(accountRows) {
-  const tb = document.getElementById('assets-tbody');
-  tb.innerHTML = '';
-  accountRows.forEach((a, i) => {
-    const tr = document.createElement('tr');
-    tr.dataset.idx = i;
-    const isFixed = FIXED_ACCOUNTS.some(fa => fa.name === a.account_name);
-    tr.innerHTML =
-      '<td>' +
-        (isFixed
-          ? '<span style="color:var(--text);font-size:14px;padding:4px 8px;display:block">' + a.account_name + '</span>'
-          : '<input class="editable-cell" data-f="name" value="' + a.account_name + '" style="width:100%" />') +
-      '</td>' +
-      '<td>' +
-        '<select class="editable-cell" data-f="type" style="width:150px">' +
-          Object.entries(TYPE_LABELS).map(([v, l]) =>
-            '<option value="' + v + '"' + (a.account_type === v ? ' selected' : '') + '>' + l + '</option>'
-          ).join('') +
-        '</select>' +
-      '</td>' +
-      '<td style="text-align:right">' +
-        '<input class="editable-cell mono" data-f="balance" type="number" value="' + (a.balance || '') + '"' +
-          ' placeholder="0" style="text-align:right;width:180px" oninput="liveUpdate()"' +
-          ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();liveUpdate();saveAll();}" />' +
-      '</td>';
-    tb.appendChild(tr);
+  assetAccounts.forEach(acc => {
+    let rowHtml = `<td>${acc}</td>`;
+    months.forEach(m => {
+      const val = historyData[m][acc] || 0;
+      // Auto-detect if currency is USD based on naming convention (e.g. contains USD or $), otherwise treat as ILS
+      let valInILS = acc.toUpperCase().includes('USD') ? val * currentFXRate : val;
+      rowHtml += `<td style="font-family:'DM Mono',monospace">${fmtMoney(valInILS)}</td>`;
+      
+      // Track latest month numbers for KPIs
+      if (m === months[months.length - 1]) {
+        latestNetWorth += valInILS;
+        if (!acc.toLowerCase().includes('property')) liquidTotal += valInILS;
+      }
+    });
+    tbody.innerHTML += `<tr>${rowHtml}</tr>`;
   });
-  calcTotal();
+
+  document.getElementById('kpi-networth').textContent = fmtMoney(latestNetWorth);
+  document.getElementById('kpi-liquid').textContent = fmtMoney(liquidTotal);
+
+  // Populate modal account dropdown
+  const select = document.getElementById('snap-account');
+  select.innerHTML = '';
+  assetAccounts.forEach(acc => {
+    select.innerHTML += `<option value="${acc}">${acc}</option>`;
+  });
+  
+  // Set default modal year/month to current date
+  const now = new Date();
+  document.getElementById('snap-year').value = now.getFullYear();
+  document.getElementById('snap-month').value = now.getMonth() + 1;
 }
 
-function liveUpdate() {
-  const data = getTableData();
-  updateKPIs(data);
-  calcTotal();
-  buildAllocChart(data);
-}
+function renderNetWorthChart() {
+  const months = Object.keys(historyData).sort();
+  if (!months.length) return;
 
-function moveNext(el) {
-  const all = Array.from(document.querySelectorAll('[data-f=balance]'));
-  const i = all.indexOf(el);
-  if (i < all.length - 1) {
-    all[i + 1].focus();
+  const totals = months.map(m => {
+    let sum = 0;
+    const accs = historyData[m];
+    for (let acc in accs) {
+      let val = accs[acc];
+      sum += acc.toUpperCase().includes('USD') ? val * currentFXRate : val;
+    }
+    return sum;
+  });
+
+  const ctx = document.getElementById('networth-chart').getContext('2d');
+  if (nwChart) {
+    nwChart.data.labels = months;
+    nwChart.data.datasets[0].data = totals;
+    nwChart.update();
   } else {
-    // Last field — save automatically
-    saveAll();
+    nwChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: months,
+        datasets: [{
+          label: 'Total Net Worth (ILS)',
+          data: totals,
+          borderColor: '#5b8df6',
+          backgroundColor: 'rgba(91,141,246,0.1)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { ticks: { callback: v => '₪' + v.toLocaleString() } } }
+      }
+    });
   }
 }
 
-function calcTotal() {
-  const data = getTableData();
-  const t = data.reduce((s, a) => s + (+a.balance || 0), 0);
-  document.getElementById('assets-total').textContent = FF.ils(t);
-}
+// Modal Controllers
+function openAccountModal() { document.getElementById('account-modal').style.display = 'flex'; }
+function closeAccountModal() { document.getElementById('account-modal').style.display = 'none'; }
+function openSnapshotModal() { document.getElementById('snapshot-modal').style.display = 'flex'; }
+function closeSnapshotModal() { document.getElementById('snapshot-modal').style.display = 'none'; }
 
-function getTableData() {
-  const rows = [];
-  document.querySelectorAll('#assets-tbody tr[data-idx]').forEach((tr, i) => {
-    const nameEl = tr.querySelector('[data-f=name]');
-    rows.push({
-      account_name: nameEl ? nameEl.value : FIXED_ACCOUNTS[i] ? FIXED_ACCOUNTS[i].name : '',
-      account_type: tr.querySelector('[data-f=type]').value,
-      balance:      parseFloat(tr.querySelector('[data-f=balance]').value) || 0
-    });
+async function handleAccountSubmit(e) {
+  e.preventDefault();
+  const name = document.getElementById('acc-name').value.trim();
+  const type = document.getElementById('acc-type').value;
+  const currency = document.getElementById('acc-currency').value;
+  const fullName = currency === 'USD' ? `${name} (USD)` : name;
+  
+  const now = new Date();
+  closeAccountModal();
+  
+  await FF.post('/api/assets/add-account', {
+    account_name: fullName,
+    account_type: type,
+    year: now.getFullYear(),
+    month: now.getMonth() + 1
   });
-  return rows;
+  loadAssetsData();
 }
 
-async function saveAll() {
-  const btn = document.getElementById('save-btn');
-  btn.textContent = 'Saving...'; btn.disabled = true;
-  const data = getTableData();
-  try {
-    for (const a of data) {
-      await FF.post('/api/assets', {
-        year: CY, month: CM,
-        account_name: a.account_name,
-        account_type: a.account_type,
-        balance: a.balance
-      });
-    }
-    FF.toast('Saved!');
-    await loadData();
-  } catch(e) {
-    FF.toast('Error: ' + e.message, 'error');
-  }
-  btn.textContent = '✓ Save All'; btn.disabled = false;
+async function handleSnapshotSubmit(e) {
+  e.preventDefault();
+  const year = parseInt(document.getElementById('snap-year').value);
+  const month = parseInt(document.getElementById('snap-month').value);
+  const account_name = document.getElementById('snap-account').value;
+  const balance = parseFloat(document.getElementById('snap-balance').value);
+  const atype = account_name.toLowerCase().includes('inv') ? 'investment' : 'liquid';
+
+  closeSnapshotModal();
+  await FF.post('/api/assets', { year, month, account_name, account_type: atype, balance });
+  loadAssetsData();
 }
 
-function updateKPIs(accountRows) {
-  const by = { bank: 0, stocks: 0, education: 0, other: 0 };
-  accountRows.forEach(a => { by[a.account_type] = (by[a.account_type] || 0) + (+a.balance || 0); });
-  const total = Object.values(by).reduce((s, v) => s + v, 0);
-  document.getElementById('kpi-total').textContent  = FF.ils(total);
-  document.getElementById('kpi-bank').textContent   = FF.ils(by.bank);
-  document.getElementById('kpi-stocks').textContent = FF.ils(by.stocks);
-  document.getElementById('kpi-edu').textContent    = FF.ils(by.education);
-  document.getElementById('kpi-other').textContent  = FF.ils(by.other);
-}
-
-function buildAllocChart(accountRows) {
-  const by = { bank: 0, stocks: 0, education: 0, other: 0 };
-  accountRows.forEach(a => { by[a.account_type] = (by[a.account_type] || 0) + (+a.balance || 0); });
-  const ctx = document.getElementById('alloc-chart').getContext('2d');
-  if (allocChart) allocChart.destroy();
-  allocChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: Object.values(TYPE_LABELS),
-      datasets: [{ data: Object.values(by),
-        backgroundColor: [FF.colors.blue, FF.colors.gold, FF.colors.purple, FF.colors.teal],
-        borderWidth: 2, borderColor: '#1f2434' }]
-    },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
-  });
-}
-
-async function buildHistChart() {
-  const history = await FF.get('/api/assets/history');
-  const keys = Object.keys(history).sort().slice(-24);
-  const ctx = document.getElementById('hist-chart').getContext('2d');
-  if (histChart) histChart.destroy();
-  histChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: keys.map(k => { const [y, m] = k.split('-'); return FF.monthLabel(+y, +m); }),
-      datasets: [{ label: 'Total',
-        data: keys.map(k => Object.values(history[k]).reduce((s, v) => s + v, 0)),
-        borderColor: FF.colors.green, backgroundColor: FF.gradient(ctx, FF.colors.green),
-        tension: 0.4, fill: true, pointRadius: 3 }]
-    },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => '₪' + FF.dec(ctx.parsed.y) } } },
-      interaction: { mode: 'index', intersect: false },
-      scales: { y: { ticks: { callback: v => '\u20AA' + (v / 1000).toFixed(0) + 'k' } } } }
-  });
-}
-
-function showAddAccount() {
-  document.getElementById('add-account-form').style.display = 'block';
-  document.getElementById('new-acc-name').focus();
-}
-
-async function doAddAccount() {
-  const name = document.getElementById('new-acc-name').value.trim();
-  const type = document.getElementById('new-acc-type').value;
-  if (!name) { FF.toast('Enter an account name', 'error'); return; }
-  try {
-    const result = await FF.post('/api/assets/add-account', {
-      account_name: name, account_type: type, year: CY, month: CM
-    });
-    FF.toast('Added to ' + (result.added_to_months || 1) + ' month(s)');
-    document.getElementById('add-account-form').style.display = 'none';
-    document.getElementById('new-acc-name').value = '';
-    await loadData();
-  } catch(e) { FF.toast('Error: ' + e.message, 'error'); }
-}
-
-const { year, month } = FF.currentYM();
-document.getElementById('month-picker').value = year + '-' + String(month).padStart(2, '0');
-document.getElementById('load-btn').addEventListener('click', loadData);
-loadData();
+loadAssetsData();
 </script>
 {% endblock %}
