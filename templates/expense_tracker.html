@@ -1,23 +1,24 @@
 {% extends "base.html" %}
-{% block title %}Monthly Cash Flow Sheet{% endblock %}
-{% block page_title %}Monthly Cash Flow Sheet{% endblock %}
-{% block page_subtitle %}Quickly input and update your fixed monthly income and expenses in one place{% endblock %}
+{% block title %}Expense Tracker{% endblock %}
+{% block page_title %}Expense Tracker & Cash Flow{% endblock %}
+{% block page_subtitle %}Track every individual income and expense item with full descriptions{% endblock %}
 
 {% block content %}
 <style>
-  .sheet-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
-  @media (max-width: 1024px) { .sheet-grid { grid-template-columns: 1fr; } }
+  .tx-table { width: 100%; border-collapse: collapse; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); }
+  .tx-table th { background: var(--bg3); border-bottom: 1px solid var(--border2); text-align: left; padding: 10px; font-weight: 600; color: var(--text2); }
+  .tx-table th:nth-child(4), .tx-table th:nth-child(5) { text-align: right; }
+  .tx-table td { padding: 10px; border-bottom: 1px solid var(--border2); text-align: left; }
+  .tx-table td:nth-child(4), .tx-table td:nth-child(5) { text-align: right; font-family: 'DM Mono', monospace; }
+  
+  .table-wrap { overflow-x: auto; max-height: 450px; overflow-y: auto; }
+  
+  .badge-income { background: rgba(76,175,136,0.15); color: var(--green); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+  .badge-expense { background: rgba(224,92,106,0.15); color: var(--red); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
 
-  .category-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border2); }
-  .category-label { font-weight: 500; font-size: 13px; color: var(--text); }
-  .category-input { width: 140px; padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Mono', monospace; text-align: right; font-size: 14px; }
-  .category-input:focus { border-color: var(--accent); outline: none; }
-
-  .toolbar { display: flex; justify-content: space-between; margin-bottom: 20px; align-items: center; flex-wrap: wrap; gap: 12px; }
+  .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; flex-wrap: wrap; gap: 12px; }
   .filter-bar { display: flex; gap: 8px; align-items: center; }
   .filter-bar select { padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600; }
-
-  .section-total { display: flex; justify-content: space-between; align-items: center; padding-top: 14px; margin-top: 10px; font-weight: 700; font-size: 15px; border-top: 2px solid var(--border); }
 
   .skeleton {
     background: linear-gradient(90deg, var(--bg3) 25%, var(--border2) 50%, var(--bg3) 75%);
@@ -32,204 +33,195 @@
     100% { background-position: -200% 0; }
   }
 
-  .save-bar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1); position: sticky; bottom: 20px; z-index: 10; }
+  .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 1000; }
+  .modal-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+  .modal-header { font-size: 18px; font-weight: 600; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+  .form-group-custom { margin-bottom: 12px; }
+  .form-group-custom label { display: block; font-size: 12px; color: var(--text3); margin-bottom: 4px; }
+  .form-group-custom input, .form-group-custom select { width: 100%; padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Mono', monospace; }
 </style>
 
 <div class="page-body">
 
   <!-- KPIs -->
   <div class="kpi-grid" id="cashflow-kpis">
-    <div class="kpi-card green"><div class="kpi-label">Total Monthly Income</div><div class="kpi-value green skeleton" id="kpi-income">₪0</div></div>
-    <div class="kpi-card red"><div class="kpi-label">Total Monthly Expenses</div><div class="kpi-value red skeleton" id="kpi-expenses">₪0</div></div>
-    <div class="kpi-card blue"><div class="kpi-label">Net Monthly Savings</div><div class="kpi-value blue skeleton" id="kpi-savings">₪0</div></div>
+    <div class="kpi-card green"><div class="kpi-label">Total Income</div><div class="kpi-value green skeleton" id="kpi-income">₪0</div></div>
+    <div class="kpi-card red"><div class="kpi-label">Total Expenses</div><div class="kpi-value red skeleton" id="kpi-expenses">₪0</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">Net Savings</div><div class="kpi-value blue skeleton" id="kpi-savings">₪0</div></div>
     <div class="kpi-card"><div class="kpi-label">Savings Rate</div><div class="kpi-value skeleton" id="kpi-rate">0%</div></div>
   </div>
 
-  <!-- Month & Year Selector Toolbar -->
-  <div class="toolbar card" style="padding: 16px 24px; margin-bottom: 24px;">
-    <div style="font-weight: 600; font-size: 16px;">Select Target Month</div>
-    <div class="filter-bar">
-      <select id="sheet-year" onchange="loadMonthData()">
-        <!-- Populated via JS -->
-      </select>
-      <select id="sheet-month" onchange="loadMonthData()">
-        <option value="1">January</option>
-        <option value="2">February</option>
-        <option value="3">March</option>
-        <option value="4">April</option>
-        <option value="5">May</option>
-        <option value="6">June</option>
-        <option value="7">July</option>
-        <option value="8">August</option>
-        <option value="9">September</option>
-        <option value="10">October</option>
-        <option value="11">November</option>
-        <option value="12">December</option>
-      </select>
+  <!-- Transactions Table Section -->
+  <div class="card">
+    <div class="toolbar">
+      <div class="filter-bar">
+        <div style="font-weight: 600; font-size: 15px; margin-right: 8px;">Filter:</div>
+        <select id="filter-year" onchange="loadTransactions()">
+          <option value="">All Years</option>
+        </select>
+        <select id="filter-month" onchange="loadTransactions()">
+          <option value="">All Months</option>
+          <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+          <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
+          <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+          <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openTxModal()">+ Add Expense / Income</button>
+    </div>
+
+    <div class="table-wrap">
+      <table class="tx-table">
+        <thead>
+          <tr>
+            <th>Period</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Amount</th>
+            <th style="width: 80px;"></th>
+          </tr>
+        </thead>
+        <tbody id="tx-table-body">
+          <tr><td colspan="5"><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 
-  <!-- Sheet Grid (Income vs Expenses) -->
-  <form id="cashflow-form" onsubmit="saveMonthData(event)">
-    <div class="sheet-grid">
-      
-      <!-- Income Card -->
-      <div class="card">
-        <div class="card-title mb-16" style="color: var(--green);">Income Streams</div>
-        <div id="income-categories-container">
-          <!-- Injected via JS -->
-        </div>
-        <div class="section-total">
-          <span>Total Income</span>
-          <span id="sum-income" style="font-family: 'DM Mono', monospace; color: var(--green);">₪0</span>
-        </div>
-      </div>
+</div>
 
-      <!-- Expenses Card -->
-      <div class="card">
-        <div class="card-title mb-16" style="color: var(--red);">Fixed & Variable Expenses</div>
-        <div id="expense-categories-container">
-          <!-- Injected via JS -->
-        </div>
-        <div class="section-total">
-          <span>Total Expenses</span>
-          <span id="sum-expenses" style="font-family: 'DM Mono', monospace; color: var(--red);">₪0</span>
-        </div>
-      </div>
-
+<!-- Modal: Add Transaction -->
+<div class="modal-overlay" id="tx-modal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span>New Transaction</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeTxModal()">✕</button>
     </div>
-
-    <!-- Sticky Save Bar -->
-    <div class="save-bar">
-      <div>
-        <div style="font-weight: 600; font-size: 14px;" id="save-status-text">Ready to save changes</div>
-        <div style="font-size: 12px; color: var(--text3);">Values are saved instantly for the selected month</div>
+    <form onsubmit="handleTxSubmit(event)">
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div class="form-group-custom">
+          <label>Year</label>
+          <input type="number" id="tx-year" required />
+        </div>
+        <div class="form-group-custom">
+          <label>Month</label>
+          <input type="number" id="tx-month" min="1" max="12" required />
+        </div>
       </div>
-      <button type="submit" class="btn btn-primary" style="padding: 10px 24px; font-size: 14px;">Save Month Sheet</button>
-    </div>
-  </form>
-
+      <div class="form-group-custom">
+        <label>Category / Type</label>
+        <select id="tx-type">
+          <option value="income_salary">Salary (Income)</option>
+          <option value="income_other">Other Income</option>
+          <option value="housing">Housing / Rent</option>
+          <option value="food">Food & Supermarket</option>
+          <option value="utilities">Utilities</option>
+          <option value="transport">Transport</option>
+          <option value="entertainment">Entertainment</option>
+          <option value="shopping">Shopping</option>
+          <option value="other_expense">Other Expense</option>
+        </select>
+      </div>
+      <div class="form-group-custom">
+        <label>Description</label>
+        <input type="text" id="tx-desc" placeholder="e.g. Supermarket, Electricity bill..." required />
+      </div>
+      <div class="form-group-custom">
+        <label>Amount (₪)</label>
+        <input type="number" id="tx-amount" step="any" placeholder="0.00" required />
+      </div>
+      <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="btn btn-ghost" onclick="closeTxModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Entry</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Fixed categories configuration
-const INCOME_CATEGORIES = [
-  { key: 'income_salary', label: 'Primary Salary' },
-  { key: 'income_other', label: 'Other Income / Bonuses' }
-];
-
-const EXPENSE_CATEGORIES = [
-  { key: 'housing', label: 'Housing / Rent / Maintenance' },
-  { key: 'food', label: 'Food & Supermarket' },
-  { key: 'utilities', label: 'Utilities (Electricity, Water, Internet)' },
-  { key: 'transport', label: 'Transport & Fuel' },
-  { key: 'entertainment', label: 'Entertainment & Dining Out' },
-  { key: 'shopping', label: 'Shopping & Apparel' },
-  { key: 'other_expense', label: 'Other Expenses' }
-];
-
-let monthTransactions = [];
+let transactionsData = [];
 
 const fmtMoney = (n) => '₪' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(n);
 
-async function initSheet() {
+async function initPage() {
   const now = new Date();
   const currentYear = now.getFullYear();
   
-  const yearSelect = document.getElementById('sheet-year');
+  const yearSelect = document.getElementById('filter-year');
   for (let y = currentYear; y >= currentYear - 5; y--) {
     yearSelect.innerHTML += `<option value="${y}">${y}</option>`;
   }
   yearSelect.value = currentYear;
-  document.getElementById('sheet-month').value = now.getMonth() + 1;
+  document.getElementById('filter-month').value = now.getMonth() + 1;
 
-  buildFormStructure();
-  await loadMonthData();
+  await loadTransactions();
 }
 
-function buildFormStructure() {
-  const incContainer = document.getElementById('income-categories-container');
-  incContainer.innerHTML = '';
-  INCOME_CATEGORIES.forEach(cat => {
-    incContainer.innerHTML += `
-      <div class="category-row">
-        <span class="category-label">${cat.label}</span>
-        <input type="number" step="any" id="cat_${cat.key}" class="category-input" value="0" oninput="calculateTotals()" placeholder="0" />
-      </div>
-    `;
-  });
-
-  const expContainer = document.getElementById('expense-categories-container');
-  expContainer.innerHTML = '';
-  EXPENSE_CATEGORIES.forEach(cat => {
-    expContainer.innerHTML += `
-      <div class="category-row">
-        <span class="category-label">${cat.label}</span>
-        <input type="number" step="any" id="cat_${cat.key}" class="category-input" value="0" oninput="calculateTotals()" placeholder="0" />
-      </div>
-    `;
-  });
-}
-
-async function loadMonthData() {
-  const yr = document.getElementById('sheet-year').value;
-  const mo = document.getElementById('sheet-month').value;
+async function loadTransactions() {
+  const yr = document.getElementById('filter-year').value;
+  const mo = document.getElementById('filter-month').value;
+  
+  let url = '/api/transactions';
+  let params = [];
+  if (yr) params.push(`year=${yr}`);
+  if (mo) params.push(`month=${mo}`);
+  if (params.length) url += '?' + params.join('&');
 
   try {
-    const res = await FF.get(`/api/transactions?year=${yr}&month=${mo}`);
-    monthTransactions = res || [];
-
-    // Reset inputs to 0 first
-    [...INCOME_CATEGORIES, ...EXPENSE_CATEGORIES].forEach(cat => {
-      const input = document.getElementById(`cat_${cat.key}`);
-      if (input) input.value = '';
-    });
-
-    // Populate inputs with fetched values (summing if multiple entries exist per category type)
-    const categoryTotals = {};
-    monthTransactions.forEach(t => {
-      categoryTotals[t.type] = (categoryTotals[t.type] || 0) + parseFloat(t.amount);
-    });
-
-    for (let key in categoryTotals) {
-      const input = document.getElementById(`cat_${key}`);
-      if (input) {
-        input.value = categoryTotals[key];
-      }
-    }
-
-    calculateTotals();
-    document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
+    transactionsData = await FF.get(url);
+    renderTable();
+    updateKPIs();
   } catch (err) {
-    console.error('Failed to load month data', err);
+    console.error('Failed to load transactions', err);
   }
 }
 
-function calculateTotals() {
-  let totalInc = 0;
-  let totalExp = 0;
+function renderTable() {
+  const tbody = document.getElementById('tx-table-body');
+  tbody.innerHTML = '';
 
-  INCOME_CATEGORIES.forEach(cat => {
-    const val = parseFloat(document.getElementById(`cat_${cat.key}`).value) || 0;
-    totalInc += val;
+  if (!transactionsData || !transactionsData.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text3); padding:20px;">No transactions found. Click "+ Add Expense / Income" to add one.</td></tr>';
+    return;
+  }
+
+  transactionsData.forEach(t => {
+    const isIncome = t.type.startsWith('income');
+    const badge = isIncome ? `<span class="badge-income">Income</span>` : `<span class="badge-expense">${t.type}</span>`;
+    
+    tbody.innerHTML += `
+      <tr>
+        <td>${t.year}-${String(t.month).padStart(2, '0')}</td>
+        <td>${badge}</td>
+        <td>${t.description}</td>
+        <td>${fmtMoney(t.amount)}</td>
+        <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteTx(${t.id})">✕</button></td>
+      </tr>
+    `;
+  });
+}
+
+function updateKPIs() {
+  let income = 0;
+  let expenses = 0;
+
+  transactionsData.forEach(t => {
+    const amt = parseFloat(t.amount) || 0;
+    if (t.type.startsWith('income')) {
+      income += amt;
+    } else {
+      expenses += amt;
+    }
   });
 
-  EXPENSE_CATEGORIES.forEach(cat => {
-    const val = parseFloat(document.getElementById(`cat_${cat.key}`).value) || 0;
-    totalExp += val;
-  });
+  const netSavings = income - expenses;
+  const savingsRate = income > 0 ? (netSavings / income) * 100 : 0;
 
-  const netSavings = totalInc - totalExp;
-  const savingsRate = totalInc > 0 ? (netSavings / totalInc) * 100 : 0;
-
-  document.getElementById('sum-income').textContent = fmtMoney(totalInc);
-  document.getElementById('sum-expenses').textContent = fmtMoney(totalExp);
-
-  document.getElementById('kpi-income').textContent = fmtMoney(totalInc);
-  document.getElementById('kpi-expenses').textContent = fmtMoney(totalExp);
+  document.getElementById('kpi-income').textContent = fmtMoney(income);
+  document.getElementById('kpi-expenses').textContent = fmtMoney(expenses);
   
   const savingsEl = document.getElementById('kpi-savings');
   savingsEl.textContent = fmtMoney(netSavings);
@@ -238,46 +230,38 @@ function calculateTotals() {
   const rateEl = document.getElementById('kpi-rate');
   rateEl.textContent = savingsRate.toFixed(1) + '%';
   rateEl.className = 'kpi-value ' + (savingsRate >= 0 ? 'val-green' : 'val-red');
+
+  document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
 }
 
-async function saveMonthData(e) {
+function openTxModal() {
+  document.getElementById('tx-modal').style.display = 'flex';
+  const now = new Date();
+  document.getElementById('tx-year').value = now.getFullYear();
+  document.getElementById('tx-month').value = now.getMonth() + 1;
+}
+function closeTxModal() { document.getElementById('tx-modal').style.display = 'none'; }
+
+async function handleTxSubmit(e) {
   e.preventDefault();
-  const yr = parseInt(document.getElementById('sheet-year').value);
-  const mo = parseInt(document.getElementById('sheet-month').value);
-  const statusText = document.getElementById('save-status-text');
+  const year = parseInt(document.getElementById('tx-year').value);
+  const month = parseInt(document.getElementById('tx-month').value);
+  const type = document.getElementById('tx-type').value;
+  const description = document.getElementById('tx-desc').value.trim();
+  const amount = parseFloat(document.getElementById('tx-amount').value);
 
-  statusText.textContent = 'Saving changes...';
+  closeTxModal();
+  await FF.post('/api/transactions', { year, month, type, description, amount });
+  loadTransactions();
+}
 
-  try {
-    // 1. Delete all existing transactions for this month to prevent duplicates
-    for (let t of monthTransactions) {
-      await FF.del(`/api/transactions/${t.id}`);
-    }
-
-    // 2. Insert new non-zero category values
-    const allCategories = [...INCOME_CATEGORIES, ...EXPENSE_CATEGORIES];
-    for (let cat of allCategories) {
-      const val = parseFloat(document.getElementById(`cat_${cat.key}`).value) || 0;
-      if (val > 0) {
-        await FF.post('/api/transactions', {
-          year: yr,
-          month: mo,
-          type: cat.key,
-          description: cat.label,
-          amount: val
-        });
-      }
-    }
-
-    statusText.textContent = '✓ Changes saved successfully!';
-    setTimeout(() => { statusText.textContent = 'Ready to save changes'; }, 3000);
-    await loadMonthData();
-  } catch (err) {
-    statusText.textContent = 'Error saving changes!';
-    console.error(err);
+async function deleteTx(id) {
+  if (confirm('Delete this transaction?')) {
+    await FF.del(`/api/transactions/${id}`);
+    loadTransactions();
   }
 }
 
-initSheet();
+initPage();
 </script>
 {% endblock %}
