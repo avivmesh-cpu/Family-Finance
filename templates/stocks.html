@@ -101,7 +101,12 @@
   <div class="kpi-grid" id="portfolio-kpis">
     <div class="kpi-card"><div class="kpi-label">Total Investment (Cost)</div><div class="kpi-value skeleton" id="kpi-cost">Loading...</div></div>
     <div class="kpi-card blue"><div class="kpi-label">Total Market Value</div><div class="kpi-value blue skeleton" id="kpi-value">Loading...</div></div>
-    <div class="kpi-card"><div class="kpi-label">All-Time Return</div><div class="kpi-value skeleton" id="kpi-return">Loading...</div></div>
+    <div class="kpi-card"><div class="kpi-label">Annualized Return (XIRR)</div><div class="kpi-value skeleton" id="kpi-xirr">Loading...</div></div>
+    <div class="kpi-card">
+        <div class="kpi-label">YTD Return</div>
+        <div class="kpi-value skeleton" id="kpi-ytd">Loading...</div>
+        <div class="kpi-sub" id="kpi-ytd-sub" style="display:none; font-weight:500;"></div>
+    </div>
     <div class="kpi-card green"><div class="kpi-label">Realized Trade Profits</div><div class="kpi-value green skeleton" id="kpi-realized">Loading...</div></div>
     <div class="kpi-card"><div class="kpi-label">30-Day Volatility</div><div class="kpi-value skeleton" id="kpi-volatility">Loading...</div></div>
   </div>
@@ -311,6 +316,7 @@
 let portfolioData = {};
 let detailsData = {};
 let historyData = {};
+let globalYtdData = null;
 let rawHoldings = [];
 let rawTrades = [];
 let valChart = null;
@@ -347,17 +353,19 @@ function collapseAll() { document.querySelectorAll('.row-buy, .row-sell').forEac
 
 async function loadPortfolio() {
   try {
-    const [holdings, trades, details, history] = await Promise.all([
+    const [holdings, trades, details, history, ytd] = await Promise.all([
       FF.get('/api/stocks'),
       FF.get('/api/stock-trades'),
       FF.get('/api/stocks/details'),
-      FF.get('/api/stocks/history')
+      FF.get('/api/stocks/history'),
+      FF.get('/api/stocks/ytd')
     ]);
     
     rawHoldings = holdings;
     rawTrades = trades;
     detailsData = details;
     historyData = history.series || {};
+    globalYtdData = ytd;
     portfolioData = {};
     currentHoldingsList = [];
     
@@ -510,9 +518,6 @@ function renderTable() {
     tbody.innerHTML += html;
   });
 
-  const grandTotalChange = grandTotalValue - grandTotalCost;
-  const grandTotalPct = grandTotalCost > 0 ? (grandTotalChange / grandTotalCost) * 100 : 0;
-  
   let totalRealizedPnL = 0;
   rawTrades.forEach(t => {
     const sShares = parseFloat(t.shares);
@@ -523,9 +528,35 @@ function renderTable() {
 
   document.getElementById('kpi-cost').textContent = fmtMoney(grandTotalCost);
   document.getElementById('kpi-value').textContent = fmtMoney(grandTotalValue);
-  const retEl = document.getElementById('kpi-return');
-  retEl.innerHTML = formatColor(grandTotalChange, fmtMoney(Math.abs(grandTotalChange)) + ' (' + fmtPct(grandTotalPct) + ')');
-  retEl.className = 'kpi-value ' + (grandTotalChange >= 0 ? 'val-green' : 'val-red');
+
+  if (globalYtdData) {
+    // 1. Annualized Return (XIRR)
+    const xirrEl = document.getElementById('kpi-xirr');
+    const xirrVal = globalYtdData.portfolio_xirr || 0;
+    xirrEl.innerHTML = formatColor(xirrVal, (xirrVal > 0 ? '+' : '') + xirrVal.toFixed(2) + '%');
+    xirrEl.className = 'kpi-value ' + (xirrVal >= 0 ? 'val-green' : 'val-red');
+    
+    // 2. YTD Return vs SPY
+    const ytdEl = document.getElementById('kpi-ytd');
+    const ytdSub = document.getElementById('kpi-ytd-sub');
+    const ytdVal = globalYtdData.portfolio_ytd;
+    const spyVal = globalYtdData.sp500_ytd;
+    const diff = globalYtdData.diff;
+    
+    if (ytdVal !== null) {
+        ytdEl.innerHTML = formatColor(ytdVal, (ytdVal > 0 ? '+' : '') + ytdVal.toFixed(2) + '%');
+        ytdEl.className = 'kpi-value ' + (ytdVal >= 0 ? 'val-green' : 'val-red');
+        
+        if (spyVal !== null && diff !== null) {
+            ytdSub.style.display = 'block';
+            const diffColor = diff > 0 ? 'var(--green)' : 'var(--red)';
+            ytdSub.innerHTML = `vs SPY: ${spyVal.toFixed(2)}% (<span style="color:${diffColor}">${diff > 0 ? '+' : ''}${diff.toFixed(2)}%</span>)`;
+        }
+    } else {
+        ytdEl.textContent = 'N/A';
+        ytdEl.className = 'kpi-value';
+    }
+  }
 
   const realizedEl = document.getElementById('kpi-realized');
   realizedEl.textContent = fmtMoney(totalRealizedPnL);
