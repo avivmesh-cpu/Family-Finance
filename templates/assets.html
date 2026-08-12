@@ -28,7 +28,6 @@
   }
 
   .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; flex-wrap: wrap; gap: 8px; }
-  .currency-badge { background: var(--bg3); border: 1px solid var(--border2); padding: 2px 6px; border-radius: 4px; font-size: 10px; font-family: 'DM Mono', monospace; color: var(--text2); }
   
   .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 1000; }
   .modal-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
@@ -43,7 +42,7 @@
   <!-- KPIs -->
   <div class="kpi-grid" id="asset-kpis">
     <div class="kpi-card blue"><div class="kpi-label">Current Net Worth (ILS)</div><div class="kpi-value blue skeleton" id="kpi-networth">Loading...</div></div>
-    <div class="kpi-card"><div class="kpi-label">Total Liquid Assets</div><div class="kpi-value skeleton" id="kpi-liquid">Loading...</div></div>
+    <div class="kpi-card"><div class="kpi-label">Liquid Assets (Bank & IBI)</div><div class="kpi-value skeleton" id="kpi-liquid">Loading...</div></div>
     <div class="kpi-card"><div class="kpi-label">Live USD/ILS Rate</div><div class="kpi-value skeleton" id="kpi-fx">Loading...</div></div>
   </div>
 
@@ -99,7 +98,7 @@
     <form onsubmit="handleAccountSubmit(event)">
       <div class="form-group-custom">
         <label>Account Name</label>
-        <input type="text" id="acc-name" placeholder="e.g., US Brokerage (USD)" required />
+        <input type="text" id="acc-name" placeholder="e.g., IBI or Bank Hapoalim" required />
       </div>
       <div class="form-group-custom">
         <label>Category Type</label>
@@ -164,7 +163,7 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-let currentFXRate = 3.65; // Default fallback
+let currentFXRate = 3.65;
 let historyData = {};
 let assetAccounts = [];
 let nwChart = null;
@@ -173,7 +172,6 @@ const fmtMoney = (n) => '₪' + new Intl.NumberFormat('en-US', {maximumFractionD
 
 async function loadAssetsData() {
   try {
-    // Fetch FX rate and asset history in parallel
     const [fxRes, historyRes] = await Promise.all([
       FF.get('/api/daughter/fetch-prices'),
       FF.get('/api/assets/history')
@@ -205,7 +203,6 @@ function renderAssetsTable() {
     return;
   }
 
-  // Extract unique accounts across all months
   const accountsSet = new Set();
   assetAccounts = [];
   months.forEach(m => {
@@ -213,29 +210,30 @@ function renderAssetsTable() {
   });
   assetAccounts = Array.from(accountsSet);
 
-  // Build Table Headers (Months)
   headRow.innerHTML = '<th>Account Name</th>';
   months.forEach(m => {
     headRow.innerHTML += `<th>${m}</th>`;
   });
 
-  // Build Table Rows (Accounts)
   tbody.innerHTML = '';
   let latestNetWorth = 0;
   let liquidTotal = 0;
+  const latestMonth = months[months.length - 1];
 
   assetAccounts.forEach(acc => {
     let rowHtml = `<td>${acc}</td>`;
     months.forEach(m => {
       const val = historyData[m][acc] || 0;
-      // Auto-detect if currency is USD based on naming convention (e.g. contains USD or $), otherwise treat as ILS
       let valInILS = acc.toUpperCase().includes('USD') ? val * currentFXRate : val;
       rowHtml += `<td style="font-family:'DM Mono',monospace">${fmtMoney(valInILS)}</td>`;
       
-      // Track latest month numbers for KPIs
-      if (m === months[months.length - 1]) {
+      if (m === latestMonth) {
         latestNetWorth += valInILS;
-        if (!acc.toLowerCase().includes('property')) liquidTotal += valInILS;
+        // Strictly filter liquid assets to Bank accounts and IBI account names
+        const cleanName = acc.toLowerCase();
+        if (cleanName.includes('bank') || cleanName.includes('ibi') || cleanName.includes('checking') || cleanName.includes('account')) {
+          liquidTotal += valInILS;
+        }
       }
     });
     tbody.innerHTML += `<tr>${rowHtml}</tr>`;
@@ -244,14 +242,12 @@ function renderAssetsTable() {
   document.getElementById('kpi-networth').textContent = fmtMoney(latestNetWorth);
   document.getElementById('kpi-liquid').textContent = fmtMoney(liquidTotal);
 
-  // Populate modal account dropdown
   const select = document.getElementById('snap-account');
   select.innerHTML = '';
   assetAccounts.forEach(acc => {
     select.innerHTML += `<option value="${acc}">${acc}</option>`;
   });
   
-  // Set default modal year/month to current date
   const now = new Date();
   document.getElementById('snap-year').value = now.getFullYear();
   document.getElementById('snap-month').value = now.getMonth() + 1;
@@ -288,20 +284,41 @@ function renderNetWorthChart() {
           backgroundColor: 'rgba(91,141,246,0.1)',
           borderWidth: 2,
           fill: true,
-          tension: 0.2
+          tension: 0.2,
+          // Cleaner hover interactivity config: hide points by default, show on hover
+          pointRadius: 0,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#5b8df6',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2
         }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { y: { ticks: { callback: v => '₪' + v.toLocaleString() } } }
+        plugins: { 
+          legend: { display: false },
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+            callbacks: {
+              label: ctx => ' Net Worth: ' + fmtMoney(ctx.parsed.y)
+            }
+          }
+        },
+        interaction: {
+          mode: 'index',
+          intersect: false
+        },
+        scales: { 
+          y: { ticks: { callback: v => '₪' + v.toLocaleString() } },
+          x: { grid: { display: false } }
+        }
       }
     });
   }
 }
 
-// Modal Controllers
 function openAccountModal() { document.getElementById('account-modal').style.display = 'flex'; }
 function closeAccountModal() { document.getElementById('account-modal').style.display = 'none'; }
 function openSnapshotModal() { document.getElementById('snapshot-modal').style.display = 'flex'; }
