@@ -1,172 +1,345 @@
 {% extends "base.html" %}
-{% block title %}Mortgage{% endblock %}
-{% block page_title %}Mortgage Tracking{% endblock %}
-{% block page_subtitle %}Monthly remaining mortgage balance{% endblock %}
+{% block title %}Mortgage Simulator{% endblock %}
+{% block page_title %}Mortgage & Early Payoff Simulator{% endblock %}
+{% block page_subtitle %}Track historical balances, analyze amortization schedules, and simulate early payoff savings{% endblock %}
 
 {% block content %}
+<style>
+  .mortgage-table { width: 100%; border-collapse: collapse; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); }
+  .mortgage-table th { background: var(--bg3); border-bottom: 1px solid var(--border2); text-align: right; padding: 10px; font-weight: 600; color: var(--text2); }
+  .mortgage-table th:first-child { text-align: left; }
+  .mortgage-table td { padding: 10px; border-bottom: 1px solid var(--border2); text-align: right; font-family: 'DM Mono', monospace; }
+  .mortgage-table td:first-child { text-align: left; font-family: 'DM Sans', sans-serif; font-weight: 500; }
+  
+  .table-wrap { overflow-x: auto; max-height: 350px; overflow-y: auto; }
+  
+  .simulator-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+  @media (max-width: 1024px) { .simulator-grid { grid-template-columns: 1fr; } }
+  
+  .form-group-custom { margin-bottom: 16px; }
+  .form-group-custom label { display: block; font-size: 12px; color: var(--text3); margin-bottom: 6px; font-weight: 500; }
+  .form-group-custom input { width: 100%; padding: 10px 12px; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Mono', monospace; font-size: 14px; }
+  .form-group-custom input:focus { border-color: var(--accent); outline: none; }
+
+  .skeleton {
+    background: linear-gradient(90deg, var(--bg3) 25%, var(--border2) 50%, var(--bg3) 75%);
+    background-size: 200% 100%;
+    animation: skeletonLoading 1.5s infinite;
+    border-radius: 4px;
+    color: transparent !important;
+    user-select: none;
+  }
+  @keyframes skeletonLoading {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; flex-wrap: wrap; gap: 8px; }
+</style>
+
 <div class="page-body">
-  <div class="kpi-grid">
-    <div class="kpi-card red">
-      <div class="kpi-label">Current Balance</div>
-      <div class="kpi-value red" id="kpi-current">—</div>
-    </div>
-    <div class="kpi-card green">
-      <div class="kpi-label">Total Paid Down</div>
-      <div class="kpi-value green" id="kpi-paid">—</div>
-      <div class="kpi-sub">Since first entry</div>
-    </div>
-    <div class="kpi-card">
-      <div class="kpi-label">Last Month Change</div>
-      <div class="kpi-value" id="kpi-change">—</div>
-    </div>
-    <div class="kpi-card blue">
-      <div class="kpi-label">Months Tracked</div>
-      <div class="kpi-value blue" id="kpi-months">0</div>
-    </div>
+
+  <!-- KPIs -->
+  <div class="kpi-grid" id="mortgage-kpis">
+    <div class="kpi-card blue"><div class="kpi-label">Current Principal Balance</div><div class="kpi-value blue skeleton" id="kpi-balance">Loading...</div></div>
+    <div class="kpi-card"><div class="kpi-label">Base Monthly Payment (P+I)</div><div class="kpi-value skeleton" id="kpi-payment">Loading...</div></div>
+    <div class="kpi-card green"><div class="kpi-label">Total Interest Saved (Extra)</div><div class="kpi-value green skeleton" id="kpi-interest-saved">₪0</div></div>
+    <div class="kpi-card"><div class="kpi-label">Time Saved (Early Payoff)</div><div class="kpi-value skeleton" id="kpi-time-saved">0 mos</div></div>
   </div>
 
-  <div class="card mb-24">
-    <div class="card-title mb-16">Remaining Balance Over Time</div>
-    <div class="chart-wrap chart-wrap-tall"><canvas id="mortgage-chart"></canvas></div>
+  <!-- Simulator & Chart Row -->
+  <div class="simulator-grid">
+    
+    <!-- Left: Interactive Inputs -->
+    <div class="card">
+      <div class="card-title mb-16">Mortgage Parameters & Early Payoff</div>
+      <form id="sim-form" onsubmit="event.preventDefault(); runSimulator();">
+        <div class="form-group-custom">
+          <label>Remaining Principal Balance (₪)</label>
+          <input type="number" id="sim-principal" step="any" value="1000000" oninput="runSimulator()" required />
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group-custom">
+            <label>Interest Rate (% Annual)</label>
+            <input type="number" id="sim-rate" step="0.01" value="4.5" oninput="runSimulator()" required />
+          </div>
+          <div class="form-group-custom">
+            <label>Remaining Term (Months)</label>
+            <input type="number" id="sim-term" value="240" oninput="runSimulator()" required />
+          </div>
+        </div>
+        <div class="form-group-custom">
+          <label>Extra Monthly Prepayment (₪)</label>
+          <input type="number" id="sim-extra" step="any" value="1000" oninput="runSimulator()" required />
+        </div>
+      </form>
+      <div style="background: var(--bg3); padding: 12px; border-radius: 8px; margin-top: 16px; font-size: 12px; color: var(--text2); line-height: 1.5;">
+        💡 <strong>Tip:</strong> Adding even a modest monthly prepayment significantly reduces the compounding interest burden over the remaining life of your loan.
+      </div>
+    </div>
+
+    <!-- Right: Amortization Projection Chart -->
+    <div class="card">
+      <div class="card-title mb-16">Payoff Trajectory Projection</div>
+      <div style="height: 280px; position: relative;">
+        <canvas id="amortization-chart"></canvas>
+      </div>
+    </div>
+
   </div>
 
+  <!-- Historical Log & Management Section -->
   <div class="card">
-    <div class="flex-between mb-16">
+    <div class="toolbar">
       <div>
-        <div class="card-title">Add Monthly Entry</div>
-        <div class="card-subtitle">Enter the remaining balance for a month</div>
+        <div class="card-title">Historical Balance Tracker</div>
+        <div class="card-subtitle">Record your actual monthly mortgage statements</div>
       </div>
+      <button class="btn btn-primary btn-sm" onclick="openMortgageModal()">+ Log Balance</button>
     </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Month</label>
-        <input type="month" id="entry-month" class="form-input" />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Remaining Balance (₪)</label>
-        <input type="number" id="entry-balance" class="form-input" placeholder="e.g. 850000" style="width:200px" />
-      </div>
-      <div class="form-group" style="justify-content:flex-end">
-        <label class="form-label">&nbsp;</label>
-        <button class="btn btn-primary" onclick="addEntry()">Save Entry</button>
-      </div>
-    </div>
-
-    <div class="section-divider">History</div>
 
     <div class="table-wrap">
-      <table>
+      <table class="mortgage-table">
         <thead>
-          <tr><th>Month</th><th>Remaining Balance</th><th>Monthly Change</th><th></th></tr>
+          <tr>
+            <th>Period</th>
+            <th>Remaining Balance</th>
+            <th>Monthly Delta</th>
+            <th style="width: 80px;"></th>
+          </tr>
         </thead>
-        <tbody id="mortgage-tbody"></tbody>
+        <tbody id="mortgage-table-body">
+          <tr><td colspan="4"><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
+        </tbody>
       </table>
     </div>
   </div>
+
 </div>
+
+<!-- Modal: Log Balance -->
+<div class="modal-overlay" id="mortgage-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 1000;">
+  <div class="modal-card" style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+    <div class="modal-header" style="font-size: 18px; font-weight: 600; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+      <span>Log Mortgage Statement</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeMortgageModal()">✕</button>
+    </div>
+    <form onsubmit="handleMortgageSubmit(event)">
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div class="form-group-custom">
+          <label>Year</label>
+          <input type="number" id="m-year" required />
+        </div>
+        <div class="form-group-custom">
+          <label>Month</label>
+          <input type="number" id="m-month" min="1" max="12" required />
+        </div>
+      </div>
+      <div class="form-group-custom">
+        <label>Remaining Balance (₪)</label>
+        <input type="number" id="m-balance" step="any" placeholder="0.00" required />
+      </div>
+      <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="btn btn-ghost" onclick="closeMortgageModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Entry</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
-
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 let mortgageData = [];
-let mortChart = null;
+let amortChart = null;
 
-async function loadData() {
-  mortgageData = await FF.get('/api/mortgage');
-  renderTable();
-  updateKPIs();
-  renderChart();
-}
+const fmtMoney = (n) => '₪' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(n);
 
-function renderTable() {
-  const tbody = document.getElementById('mortgage-tbody');
-  tbody.innerHTML = '';
-  const sorted = [...mortgageData].sort((a,b) => b.year-a.year || b.month-a.month);
-  sorted.forEach((r, i) => {
-    const prev = sorted[i+1];
-    const change = prev ? prev.remaining_balance - r.remaining_balance : null;
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${FF.monthLabel(r.year, r.month)}</td>
-      <td class="td-mono td-negative">${FF.ils(r.remaining_balance)}</td>
-      <td class="${change !== null ? (change > 0 ? 'td-positive' : 'td-negative') : ''} td-mono">
-        ${change !== null ? (change > 0 ? '↓ ' : '↑ ') + FF.ils(Math.abs(change)) : '—'}
-      </td>
-      <td class="text-right"><button class="btn btn-danger btn-icon" onclick="deleteEntry(${r.id})">✕</button></td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-function updateKPIs() {
-  if (!mortgageData.length) return;
-  const sorted = [...mortgageData].sort((a,b) => a.year-b.year || a.month-b.month);
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
-  const prev = sorted.length > 1 ? sorted[sorted.length - 2] : null;
-
-  document.getElementById('kpi-current').textContent = FF.ils(last.remaining_balance);
-  document.getElementById('kpi-paid').textContent = FF.ils(first.remaining_balance - last.remaining_balance);
-  document.getElementById('kpi-months').textContent = sorted.length;
-
-  if (prev) {
-    const change = prev.remaining_balance - last.remaining_balance;
-    const el = document.getElementById('kpi-change');
-    el.textContent = (change > 0 ? '↓ ' : '↑ ') + FF.ils(Math.abs(change));
-    el.className = 'kpi-value ' + (change > 0 ? 'green' : 'red');
+async function loadMortgageData() {
+  try {
+    mortgageData = await FF.get('/api/mortgage');
+    renderMortgageTable();
+    
+    if (mortgageData && mortgageData.length > 0) {
+      // Sort ascending by date to grab latest
+      const sorted = [...mortgageData].sort((a,b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+      const latest = sorted[sorted.length - 1];
+      document.getElementById('sim-principal').value = latest.remaining_balance;
+    }
+    
+    runSimulator();
+  } catch (err) {
+    console.error('Failed to load mortgage history', err);
   }
 }
 
-function renderChart() {
-  const sorted = [...mortgageData].sort((a,b) => a.year-b.year || a.month-b.month);
-  const labels = sorted.map(r => FF.monthLabel(r.year, r.month));
-  const values = sorted.map(r => r.remaining_balance);
-  const ctx = document.getElementById('mortgage-chart').getContext('2d');
-  if (mortChart) mortChart.destroy();
-  mortChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: 'Remaining Balance',
-        data: values,
-        borderColor: FF.colors.red,
-        backgroundColor: FF.gradient(ctx, FF.colors.red, 0.25, 0),
-        tension: 0.3, fill: true, pointRadius: 4, pointBackgroundColor: FF.colors.red
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => '₪' + FF.dec(ctx.parsed.y) } } },
-      interaction: { mode: 'index', intersect: false },
-      scales: { y: { ticks: { callback: v => '₪' + (v/1000).toFixed(0) + 'k' }, reverse: false } }
+function renderMortgageTable() {
+  const tbody = document.getElementById('mortgage-table-body');
+  tbody.innerHTML = '';
+  
+  if (!mortgageData || !mortgageData.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text3); padding:20px;">No mortgage logs found.</td></tr>';
+    document.getElementById('kpi-balance').textContent = '₪0';
+    return;
+  }
+
+  // Sort descending for display
+  const sorted = [...mortgageData].sort((a,b) => (b.year * 12 + b.month) - (a.year * 12 + a.month));
+  
+  let latestBalance = 0;
+  sorted.forEach((item, index) => {
+    if (index === 0) latestBalance = item.remaining_balance;
+    const prevItem = sorted[index + 1];
+    let deltaStr = '--';
+    if (prevItem) {
+      const diff = item.remaining_balance - prevItem.remaining_balance;
+      const color = diff <= 0 ? 'var(--green)' : 'var(--red)';
+      deltaStr = `<span style="color:${color}">${(diff > 0 ? '+' : '') + fmtMoney(diff)}</span>`;
     }
+
+    tbody.innerHTML += `
+      <tr>
+        <td>${item.year}-${String(item.month).padStart(2, '0')}</td>
+        <td>${fmtMoney(item.remaining_balance)}</td>
+        <td>${deltaStr}</td>
+        <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteMortgage(${item.id})">✕</button></td>
+      </tr>
+    `;
   });
+
+  document.getElementById('kpi-balance').textContent = fmtMoney(latestBalance);
+  document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
 }
 
-async function addEntry() {
-  const monthVal = document.getElementById('entry-month').value;
-  const balance = document.getElementById('entry-balance').value;
-  if (!monthVal || !balance) { FF.toast('Please fill in all fields', 'error'); return; }
-  const [y, m] = monthVal.split('-');
-  try {
-    await FF.post('/api/mortgage', { year: +y, month: +m, remaining_balance: +balance });
-    await loadData();
-    FF.toast('Entry saved!');
-    document.getElementById('entry-balance').value = '';
-  } catch(e) { FF.toast('Error: ' + e.message, 'error'); }
+function runSimulator() {
+  const P = parseFloat(document.getElementById('sim-principal').value) || 0;
+  const annualRate = parseFloat(document.getElementById('sim-rate').value) || 0;
+  const r = (annualRate / 100) / 12;
+  const n = parseInt(document.getElementById('sim-term').value) || 1;
+  const extra = parseFloat(document.getElementById('sim-extra').value) || 0;
+
+  if (P <= 0 || n <= 0) return;
+
+  // Calculate Base Monthly Payment (Principal + Interest)
+  let basePayment = 0;
+  if (r > 0) {
+    basePayment = P * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+  } else {
+    basePayment = P / n;
+  }
+
+  document.getElementById('kpi-payment').textContent = fmtMoney(basePayment);
+
+  // Simulate Standard Amortization vs Accelerated Payoff
+  let balanceStandard = P;
+  let totalInterestStandard = 0;
+  let standardCurve = [P];
+
+  let balanceAccelerated = P;
+  let totalInterestAccelerated = 0;
+  let acceleratedCurve = [P];
+  let monthsAccelerated = 0;
+
+  // Standard loop
+  for (let m = 1; m <= n; m++) {
+    let interest = balanceStandard * r;
+    let principal = basePayment - interest;
+    totalInterestStandard += interest;
+    balanceStandard -= principal;
+    standardCurve.push(Math.max(0, balanceStandard));
+  }
+
+  // Accelerated loop
+  let currentMonth = 0;
+  while (balanceAccelerated > 0 && currentMonth < 600) {
+    currentMonth++;
+    let interest = balanceAccelerated * r;
+    let principal = (basePayment - interest) + extra;
+    totalInterestAccelerated += interest;
+    
+    if (balanceAccelerated <= principal) {
+      balanceAccelerated = 0;
+    } else {
+      balanceAccelerated -= principal;
+    }
+    acceleratedCurve.push(Math.max(0, balanceAccelerated));
+    if (balanceAccelerated === 0) break;
+  }
+
+  const interestSaved = Math.max(0, totalInterestStandard - totalInterestAccelerated);
+  const monthsSaved = Math.max(0, n - currentMonth);
+
+  document.getElementById('kpi-interest-saved').textContent = fmtMoney(interestSaved);
+  document.getElementById('kpi-time-saved').textContent = `${Math.floor(monthsSaved / 12)} yrs ${monthsSaved % 12} mos`;
+
+  renderAmortizationChart(standardCurve, acceleratedCurve);
 }
 
-async function deleteEntry(id) {
-  if (!confirm('Delete this entry?')) return;
-  await FF.del(`/api/mortgage/${id}`);
-  await loadData();
-  FF.toast('Deleted');
+function renderAmortizationChart(standard, accelerated) {
+  const maxLen = Math.max(standard.length, accelerated.length);
+  const labels = Array.from({length: maxLen}, (_, i) => `Mo ${i}`);
+
+  const ctx = document.getElementById('amortization-chart').getContext('2d');
+  if (amortChart) {
+    amortChart.data.labels = labels;
+    amortChart.data.datasets[0].data = standard;
+    amortChart.data.datasets[1].data = accelerated;
+    amortChart.update();
+  } else {
+    amortChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'Standard Path', data: standard, borderColor: '#e05c6a', borderWidth: 2, fill: false, pointRadius: 0, tension: 0.1 },
+          { label: 'Accelerated Path', data: accelerated, borderColor: '#4caf88', borderWidth: 2, fill: false, pointRadius: 0, tension: 0.1 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'top' },
+          tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => ctx.dataset.label + ': ' + fmtMoney(ctx.parsed.y) } }
+        },
+        interaction: { mode: 'index', intersect: false },
+        scales: { 
+          y: { ticks: { callback: v => '₪' + (v/1000).toFixed(0) + 'k' } },
+          x: { display: false }
+        }
+      }
+    });
+  }
 }
 
-const { year, month } = FF.currentYM();
-document.getElementById('entry-month').value = `${year}-${String(month).padStart(2,'0')}`;
-loadData();
+function openMortgageModal() {
+  document.getElementById('mortgage-modal').style.display = 'flex';
+  const now = new Date();
+  document.getElementById('m-year').value = now.getFullYear();
+  document.getElementById('m-month').value = now.getMonth() + 1;
+}
+function closeMortgageModal() { document.getElementById('mortgage-modal').style.display = 'none'; }
+
+async function handleMortgageSubmit(e) {
+  e.preventDefault();
+  const year = parseInt(document.getElementById('m-year').value);
+  const month = parseInt(document.getElementById('m-month').value);
+  const remaining_balance = parseFloat(document.getElementById('m-balance').value);
+
+  closeMortgageModal();
+  await FF.post('/api/mortgage', { year, month, remaining_balance });
+  loadMortgageData();
+}
+
+async function deleteMortgage(id) {
+  if (confirm('Delete this mortgage entry?')) {
+    await FF.del(`/api/mortgage/${id}`);
+    loadMortgageData();
+  }
+}
+
+loadMortgageData();
 </script>
 {% endblock %}
