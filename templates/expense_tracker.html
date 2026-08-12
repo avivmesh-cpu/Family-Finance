@@ -1,260 +1,345 @@
 {% extends "base.html" %}
-{% block title %}Expense Tracker{% endblock %}
-{% block page_title %}Expense Tracker{% endblock %}
-{% block page_subtitle %}Track expenses across months{% endblock %}
+{% block title %}Expense Tracker & Cash Flow{% endblock %}
+{% block page_title %}Expense Tracker & Cash Flow{% endblock %}
+{% block page_subtitle %}Monitor your income streams, spending habits, and monthly savings rate{% endblock %}
 
 {% block content %}
+<style>
+  .tx-table { width: 100%; border-collapse: collapse; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); }
+  .tx-table th { background: var(--bg3); border-bottom: 1px solid var(--border2); text-align: left; padding: 10px; font-weight: 600; color: var(--text2); }
+  .tx-table th:nth-child(4), .tx-table th:nth-child(5) { text-align: right; }
+  .tx-table td { padding: 10px; border-bottom: 1px solid var(--border2); text-align: left; }
+  .tx-table td:nth-child(4), .tx-table td:nth-child(5) { text-align: right; font-family: 'DM Mono', monospace; }
+  
+  .table-wrap { overflow-x: auto; max-height: 400px; overflow-y: auto; }
+  
+  .badge-income { background: rgba(76,175,136,0.15); color: var(--green); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+  .badge-expense { background: rgba(224,92,106,0.15); color: var(--red); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+
+  .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .filter-bar { display: flex; gap: 8px; align-items: center; }
+  .filter-bar select { padding: 6px 10px; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 12px; }
+
+  .skeleton {
+    background: linear-gradient(90deg, var(--bg3) 25%, var(--border2) 50%, var(--bg3) 75%);
+    background-size: 200% 100%;
+    animation: skeletonLoading 1.5s infinite;
+    border-radius: 4px;
+    color: transparent !important;
+    user-select: none;
+  }
+  @keyframes skeletonLoading {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 1000; }
+  .modal-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+  .modal-header { font-size: 18px; font-weight: 600; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+  .form-group-custom { margin-bottom: 12px; }
+  .form-group-custom label { display: block; font-size: 12px; color: var(--text3); margin-bottom: 4px; }
+  .form-group-custom input, .form-group-custom select { width: 100%; padding: 8px 12px; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Mono', monospace; }
+</style>
+
 <div class="page-body">
 
-  <div class="month-bar">
-    <label>Year:</label>
-    <select id="year-picker" class="month-input" style="width:100px"></select>
-    <button class="btn btn-primary btn-sm" id="load-btn">Load</button>
+  <!-- KPIs -->
+  <div class="kpi-grid" id="cashflow-kpis">
+    <div class="kpi-card green"><div class="kpi-label">Total Income</div><div class="kpi-value green skeleton" id="kpi-income">Loading...</div></div>
+    <div class="kpi-card red"><div class="kpi-label">Total Expenses</div><div class="kpi-value red skeleton" id="kpi-expenses">Loading...</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">Net Monthly Savings</div><div class="kpi-value blue skeleton" id="kpi-savings">Loading...</div></div>
+    <div class="kpi-card"><div class="kpi-label">Savings Rate</div><div class="kpi-value skeleton" id="kpi-rate">Loading...</div></div>
   </div>
 
-  <div class="kpi-grid" id="kpi-row" style="margin-bottom:24px"></div>
-
-  <!-- Always-visible multi-line trend chart -->
+  <!-- Cash Flow Trend Chart -->
   <div class="card mb-24">
-    <div class="flex-between mb-12">
+    <div class="toolbar">
       <div>
-        <div class="card-title">Expense Trends</div>
-        <div class="card-subtitle">Monthly change over time — click to add/remove lines</div>
+        <div class="card-title">Income vs. Expenses Trend</div>
+        <div class="card-subtitle">Monthly breakdown of historical cash flows</div>
       </div>
-      <div id="tracked-pills" style="display:flex;flex-wrap:wrap;gap:6px;max-width:500px;justify-content:flex-end"></div>
     </div>
-    <div class="chart-wrap" style="height:280px"><canvas id="multi-chart"></canvas></div>
-    <!-- Add expense to track -->
-    <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <select id="add-tracked-sel" class="form-input" style="width:280px;font-size:13px">
-        <option value="">— add expense to track —</option>
-      </select>
-      <button class="btn btn-ghost btn-sm" onclick="addTracked()">+ Add Line</button>
+    <div style="height: 300px; position: relative;">
+      <canvas id="cashflow-chart"></canvas>
     </div>
   </div>
 
-  <!-- Table -->
+  <!-- Transactions Table Section -->
   <div class="card">
-    <div class="flex-between mb-12">
-      <div>
-        <div class="card-title">Monthly Breakdown</div>
-        <div class="card-subtitle">Click any row to toggle it on the chart above</div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <label style="font-size:12px;color:var(--text3)">Sort by:</label>
-        <select id="sort-select" class="form-input" style="width:130px;font-size:13px" onchange="buildTable(+ySel.value)">
-          <option value="name">Name</option>
-          <option value="total" selected>Total (high→low)</option>
-          <option value="avg">Monthly Average</option>
+    <div class="toolbar">
+      <div class="filter-bar">
+        <div class="card-title" style="margin-right: 12px;">Transactions</div>
+        <select id="filter-year" onchange="loadTransactions()">
+          <option value="">All Years</option>
+        </select>
+        <select id="filter-month" onchange="loadTransactions()">
+          <option value="">All Months</option>
+          <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+          <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
+          <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+          <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
         </select>
       </div>
+      <button class="btn btn-primary btn-sm" onclick="openTxModal()">+ Add Transaction</button>
     </div>
-    <div class="table-wrap" id="table-wrap"></div>
+
+    <div class="table-wrap">
+      <table class="tx-table">
+        <thead>
+          <tr>
+            <th>Period</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Amount</th>
+            <th style="width: 80px;"></th>
+          </tr>
+        </thead>
+        <tbody id="tx-table-body">
+          <tr><td colspan="5"><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
 </div>
+
+<!-- Modal: Add Transaction -->
+<div class="modal-overlay" id="tx-modal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <span>New Transaction</span>
+      <button class="btn btn-ghost btn-sm" onclick="closeTxModal()">✕</button>
+    </div>
+    <form onsubmit="handleTxSubmit(event)">
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div class="form-group-custom">
+          <label>Year</label>
+          <input type="number" id="tx-year" required />
+        </div>
+        <div class="form-group-custom">
+          <label>Month</label>
+          <input type="number" id="tx-month" min="1" max="12" required />
+        </div>
+      </div>
+      <div class="form-group-custom">
+        <label>Category / Type</label>
+        <select id="tx-type">
+          <option value="income_salary">Salary (Income)</option>
+          <option value="income_other">Other Income</option>
+          <option value="housing">Housing / Rent</option>
+          <option value="food">Food & Dining</option>
+          <option value="utilities">Utilities</option>
+          <option value="transport">Transport</option>
+          <option value="entertainment">Entertainment</option>
+          <option value="shopping">Shopping</option>
+          <option value="other_expense">Other Expense</option>
+        </select>
+      </div>
+      <div class="form-group-custom">
+        <label>Description</label>
+        <input type="text" id="tx-desc" placeholder="e.g. Supermarket" required />
+      </div>
+      <div class="form-group-custom">
+        <label>Amount (₪)</label>
+        <input type="number" id="tx-amount" step="any" placeholder="0.00" required />
+      </div>
+      <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="btn btn-ghost" onclick="closeTxModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Transaction</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-let summaryData = {}, multiChart = null;
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const PALETTE = ['#5b8df6','#4caf88','#c9a84c','#e05c6a','#9b7cf8','#4cc9c9','#f08c4b','#e87dbd','#7dc8e8','#a8d86e','#e8c96a','#5dcaa5'];
+let transactionsData = [];
+let summaryData = {};
+let cfChart = null;
 
-// Default tracked expenses
-let trackedExps = ['משכנתא','מצרכי מזון','דלק לרכב','אוכל בחוץ (מסעדות, בתי קפה, משלוחים)'];
+const fmtMoney = (n) => '₪' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(n);
 
-// Year picker
-const curY = new Date().getFullYear();
-const ySel = document.getElementById('year-picker');
-for(let y = curY; y >= curY - 4; y--){
-  const o = document.createElement('option');
-  o.value = y; o.textContent = y;
-  if(y === curY) o.selected = true;
-  ySel.appendChild(o);
+async function initPage() {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  
+  // Populate year dropdown options dynamically
+  const yearSelect = document.getElementById('filter-year');
+  for (let y = currentYear; y >= currentYear - 4; y--) {
+    yearSelect.innerHTML += `<option value="${y}">${y}</option>`;
+  }
+  yearSelect.value = currentYear;
+  document.getElementById('filter-month').value = now.getMonth() + 1;
+
+  await loadSummary();
+  await loadTransactions();
 }
 
-async function loadData(){
-  const year = +ySel.value;
-  const allRows = [];
-  for(let m = 1; m <= 12; m++){
-    const data = await FF.get(`/api/transactions?year=${year}&month=${m}`);
-    data.filter(r=>r.type==='expense').forEach(r=>{
-      const desc = r.description.replace(/^\[[^\]]+\]\s*/,'');
-      allRows.push({month:m, desc, amount:r.amount||0});
+async function loadSummary() {
+  try {
+    summaryData = await FF.get('/api/transactions/summary');
+    renderChart();
+  } catch (err) {
+    console.error('Failed to load transaction summary', err);
+  }
+}
+
+async function loadTransactions() {
+  const yr = document.getElementById('filter-year').value;
+  const mo = document.getElementById('filter-month').value;
+  
+  let url = '/api/transactions';
+  let params = [];
+  if (yr) params.push(`year=${yr}`);
+  if (mo) params.push(`month=${mo}`);
+  if (params.length) url += '?' + params.join('&');
+
+  try {
+    transactionsData = await FF.get(url);
+    renderTable();
+    updateKPIs(yr, mo);
+  } catch (err) {
+    console.error('Failed to load transactions', err);
+  }
+}
+
+function renderTable() {
+  const tbody = document.getElementById('tx-table-body');
+  tbody.innerHTML = '';
+
+  if (!transactionsData || !transactionsData.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text3); padding:20px;">No transactions found for this period.</td></tr>';
+    return;
+  }
+
+  transactionsData.forEach(t => {
+    const isIncome = t.type.startsWith('income');
+    const badge = isIncome ? `<span class="badge-income">Income</span>` : `<span class="badge-expense">${t.type}</span>`;
+    
+    tbody.innerHTML += `
+      <tr>
+        <td>${t.year}-${String(t.month).padStart(2, '0')}</td>
+        <td>${badge}</td>
+        <td>${t.description}</td>
+        <td>${fmtMoney(t.amount)}</td>
+        <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteTx(${t.id})">✕</button></td>
+      </tr>
+    `;
+  });
+}
+
+function updateKPIs(selectedYr, selectedMo) {
+  let income = 0;
+  let expenses = 0;
+
+  if (selectedYr && selectedMo) {
+    // Exact month filter match
+    const key = `${selectedYr}-${String(selectedMo).padStart(2, '0')}`;
+    const mData = summaryData[key];
+    if (mData) {
+      income = mData.salary + mData.other_income;
+      expenses = mData.expenses;
+    }
+  } else {
+    // Aggregate summary matching filter criteria
+    for (let k in summaryData) {
+      const [y, m] = k.split('-');
+      if ((!selectedYr || y === selectedYr) && (!selectedMo || parseInt(m) === parseInt(selectedMo))) {
+        income += (summaryData[k].salary + summaryData[k].other_income);
+        expenses += summaryData[k].expenses;
+      }
+    }
+  }
+
+  const netSavings = income - expenses;
+  const savingsRate = income > 0 ? (netSavings / income) * 100 : 0;
+
+  document.getElementById('kpi-income').textContent = fmtMoney(income);
+  document.getElementById('kpi-expenses').textContent = fmtMoney(expenses);
+  
+  const savingsEl = document.getElementById('kpi-savings');
+  savingsEl.textContent = fmtMoney(netSavings);
+  savingsEl.className = 'kpi-value ' + (netSavings >= 0 ? 'blue' : 'val-red');
+
+  const rateEl = document.getElementById('kpi-rate');
+  rateEl.textContent = savingsRate.toFixed(1) + '%';
+  rateEl.className = 'kpi-value ' + (savingsRate >= 0 ? 'val-green' : 'val-red');
+
+  document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
+}
+
+function renderChart() {
+  const months = Object.keys(summaryData).sort();
+  if (!months.length) return;
+
+  const incomeVals = months.map(m => summaryData[m].salary + summaryData[m].other_income);
+  const expenseVals = months.map(m => summaryData[m].expenses);
+
+  const ctx = document.getElementById('cashflow-chart').getContext('2d');
+  if (cfChart) {
+    cfChart.data.labels = months;
+    cfChart.data.datasets[0].data = incomeVals;
+    cfChart.data.datasets[1].data = expenseVals;
+    cfChart.update();
+  } else {
+    cfChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: months,
+        datasets: [
+          { label: 'Income', data: incomeVals, backgroundColor: '#4caf88', borderRadius: 4 },
+          { label: 'Expenses', data: expenseVals, backgroundColor: '#e05c6a', borderRadius: 4 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'top' },
+          tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + fmtMoney(ctx.parsed.y) } }
+        },
+        scales: { 
+          y: { ticks: { callback: v => '₪' + v.toLocaleString() } },
+          x: { grid: { display: false } }
+        }
+      }
     });
   }
-  summaryData = {};
-  allRows.forEach(r=>{
-    if(!summaryData[r.desc]) summaryData[r.desc] = {};
-    summaryData[r.desc][r.month] = (summaryData[r.desc][r.month]||0) + r.amount;
-  });
-  buildKPIs(year);
-  buildTable(year);
-  buildMultiChart();
-  populateAddSelect();
 }
 
-function buildKPIs(year){
-  const totals = Array.from({length:12},(_,i)=>Object.values(summaryData).reduce((s,v)=>s+(v[i+1]||0),0));
-  const nonZero = totals.filter(v=>v>0);
-  const maxIdx = totals.indexOf(Math.max(...nonZero));
-  const minIdx = totals.indexOf(Math.min(...nonZero));
-  const avg = nonZero.reduce((s,v)=>s+v,0)/(nonZero.length||1);
-  const total = totals.reduce((s,v)=>s+v,0);
-  document.getElementById('kpi-row').innerHTML = `
-    <div class="kpi-card"><div class="kpi-label">Total ${year}</div><div class="kpi-value" style="font-size:20px">${FF.ils(total)}</div></div>
-    <div class="kpi-card"><div class="kpi-label">Monthly Average</div><div class="kpi-value" style="font-size:20px">${FF.ils(avg)}</div></div>
-    <div class="kpi-card green"><div class="kpi-label">Lowest Month</div><div class="kpi-value green" style="font-size:20px">${FF.ils(totals[minIdx])}</div><div class="kpi-sub">${MONTHS[minIdx]||''}</div></div>
-    <div class="kpi-card red"><div class="kpi-label">Highest Month</div><div class="kpi-value red" style="font-size:20px">${FF.ils(totals[maxIdx])}</div><div class="kpi-sub">${MONTHS[maxIdx]||''}</div></div>`;
+function openTxModal() {
+  document.getElementById('tx-modal').style.display = 'flex';
+  const now = new Date();
+  document.getElementById('tx-year').value = now.getFullYear();
+  document.getElementById('tx-month').value = now.getMonth() + 1;
+}
+function closeTxModal() { document.getElementById('tx-modal').style.display = 'none'; }
+
+async function handleTxSubmit(e) {
+  e.preventDefault();
+  const year = parseInt(document.getElementById('tx-year').value);
+  const month = parseInt(document.getElementById('tx-month').value);
+  const type = document.getElementById('tx-type').value;
+  const description = document.getElementById('tx-desc').value.trim();
+  const amount = parseFloat(document.getElementById('tx-amount').value);
+
+  closeTxModal();
+  await FF.post('/api/transactions', { year, month, type, description, amount });
+  await loadSummary();
+  loadTransactions();
 }
 
-function buildTable(year){
-  const wrap = document.getElementById('table-wrap');
-  let expenses = Object.keys(summaryData);
-  if(!expenses.length){ wrap.innerHTML='<div class="empty-state"><p>No expense data for this year yet.</p></div>'; return; }
-
-  // Sort
-  const sort = document.getElementById('sort-select').value;
-  if(sort === 'total'){
-    expenses.sort((a,b)=>Object.values(summaryData[b]).reduce((s,v)=>s+v,0)-Object.values(summaryData[a]).reduce((s,v)=>s+v,0));
-  } else if(sort === 'avg'){
-    expenses.sort((a,b)=>{
-      const avgA = Object.values(summaryData[a]).reduce((s,v)=>s+v,0)/(Object.keys(summaryData[a]).length||1);
-      const avgB = Object.values(summaryData[b]).reduce((s,v)=>s+v,0)/(Object.keys(summaryData[b]).length||1);
-      return avgB - avgA;
-    });
-  } else {
-    expenses.sort();
+async function deleteTx(id) {
+  if (confirm('Delete this transaction?')) {
+    await FF.del(`/api/transactions/${id}`);
+    await loadSummary();
+    loadTransactions();
   }
-
-  const monthTotals = Array.from({length:12},(_,i)=>expenses.reduce((s,e)=>s+(summaryData[e][i+1]||0),0));
-
-  let html = '<table style="width:100%;min-width:900px"><thead><tr>';
-  html += '<th style="text-align:left;position:sticky;left:0;background:var(--bg2);z-index:2;min-width:200px">Expense</th>';
-  MONTHS.forEach(m => html += `<th style="text-align:right;min-width:75px">${m}</th>`);
-  html += '<th style="text-align:right;min-width:90px">Total</th></tr></thead><tbody>';
-
-  expenses.forEach(exp=>{
-    const months = summaryData[exp];
-    const total = Object.values(months).reduce((s,v)=>s+v,0);
-    if(total === 0) return;
-    const isTracked = trackedExps.includes(exp);
-    const trackIdx = trackedExps.indexOf(exp);
-    const dotColor = isTracked ? PALETTE[trackIdx % PALETTE.length] : 'transparent';
-    html += `<tr onclick="toggleTracked('${exp.replace(/'/g,"\\'")}')" style="cursor:pointer" class="exp-row">`;
-    html += `<td style="position:sticky;left:0;background:var(--surface);z-index:1;padding:8px 14px">
-      <div style="display:flex;align-items:center;gap:8px;direction:rtl">
-        <span style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0;border:1px solid var(--border2)"></span>
-        <span style="font-size:13px">${exp}</span>
-      </div></td>`;
-    for(let m=1;m<=12;m++){
-      const v = months[m]||0;
-      const max = Math.max(...Object.values(months));
-      const bg = v>0 ? `rgba(224,92,106,${(v/max)*0.35})` : 'transparent';
-      html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;background:${bg};padding:8px 10px">${v>0?FF.ils(v):'—'}</td>`;
-    }
-    html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:500;color:var(--red);padding:8px 10px">${FF.ils(total)}</td>`;
-    html += '</tr>';
-  });
-
-  html += '<tr style="border-top:2px solid var(--border2)">';
-  html += '<td style="position:sticky;left:0;background:var(--bg3);z-index:1;font-size:12px;font-weight:500;color:var(--text2);padding:10px 14px">Total</td>';
-  monthTotals.forEach(v=>{ html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:500">${v>0?FF.ils(v):'—'}</td>`; });
-  html += `<td style="text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:600;color:var(--accent)">${FF.ils(monthTotals.reduce((s,v)=>s+v,0))}</td>`;
-  html += '</tr></tbody></table>';
-  wrap.innerHTML = html;
 }
 
-function buildMultiChart(){
-  const ctx = document.getElementById('multi-chart').getContext('2d');
-  if(multiChart) multiChart.destroy();
-
-  const active = trackedExps.filter(exp => summaryData[exp]);
-  if(!active.length){ multiChart = null; buildPills(); return; }
-
-  // Only include months where at least one tracked expense has a value > 0
-  const activeMonths = Array.from({length:12},(_,i)=>i+1).filter(m =>
-    active.some(exp => (summaryData[exp]?.[m] || 0) > 0)
-  );
-
-  if(!activeMonths.length){ multiChart = null; buildPills(); return; }
-
-  const datasets = active.map((exp, i) => ({
-    label: exp,
-    data: activeMonths.map(m => summaryData[exp]?.[m] || 0),
-    borderColor: PALETTE[trackedExps.indexOf(exp) % PALETTE.length],
-    backgroundColor: 'transparent',
-    tension: 0.4, pointRadius: 4, pointHoverRadius: 6,
-    borderWidth: 2
-  }));
-
-  multiChart = new Chart(ctx, {
-    type: 'line',
-    data: { labels: activeMonths.map(m => MONTHS[m-1]), datasets },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { y: { ticks: { callback: v => '₪'+(v/1000).toFixed(1)+'k' } } },
-      interaction: { mode: 'index', intersect: false }
-    }
-  });
-
-  buildPills();
-}
-
-function buildPills(){
-  const pills = document.getElementById('tracked-pills');
-  pills.innerHTML = '';
-  trackedExps.forEach((exp, i) => {
-    const color = PALETTE[i % PALETTE.length];
-    const pill = document.createElement('div');
-    pill.style.cssText = `display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1px solid ${color};color:${color};background:${color}22`;
-    pill.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:${color}"></span>${exp}<span style="opacity:0.7;margin-left:2px">×</span>`;
-    pill.onclick = () => { trackedExps = trackedExps.filter(e=>e!==exp); buildMultiChart(); buildTable(+ySel.value); populateAddSelect(); };
-    pills.appendChild(pill);
-  });
-}
-
-function toggleTracked(exp){
-  if(trackedExps.includes(exp)){
-    trackedExps = trackedExps.filter(e=>e!==exp);
-  } else {
-    if(trackedExps.length >= 12){ FF.toast('Max 12 lines', 'error'); return; }
-    trackedExps.push(exp);
-  }
-  buildMultiChart();
-  buildTable(+ySel.value);
-  populateAddSelect();
-}
-
-function addTracked(){
-  const sel = document.getElementById('add-tracked-sel');
-  const exp = sel.value;
-  if(!exp) return;
-  if(!trackedExps.includes(exp)){
-    if(trackedExps.length >= 12){ FF.toast('Max 12 lines', 'error'); return; }
-    trackedExps.push(exp);
-    buildMultiChart();
-    buildTable(+ySel.value);
-    populateAddSelect();
-  }
-  sel.value = '';
-}
-
-function populateAddSelect(){
-  const sel = document.getElementById('add-tracked-sel');
-  const current = sel.value;
-  sel.innerHTML = '<option value="">— add expense to track —</option>';
-  Object.keys(summaryData).filter(e=>!trackedExps.includes(e)).sort().forEach(e=>{
-    const o = document.createElement('option');
-    o.value = e; o.textContent = e;
-    sel.appendChild(o);
-  });
-  sel.value = current;
-}
-
-document.getElementById('load-btn').addEventListener('click', loadData);
-loadData();
+initPage();
 </script>
 {% endblock %}
