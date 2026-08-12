@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Expense Analysis & Matrix{% endblock %}
-{% block page_title %}Expense Analysis & Multi-Month Tracker{% endblock %}
-{% block page_subtitle %}Analyze major expenses, track month-over-month category trends, and review detailed cash flow matrixes{% endblock %}
+{% block page_title %}Expense Breakdown & Multi-Month Matrix{% endblock %}
+{% block page_subtitle %}Detailed breakdown of mortgage, restaurants, utilities, and other major expense categories over time{% endblock %}
 
 {% block content %}
 <style>
@@ -59,7 +59,7 @@
   <!-- KPIs -->
   <div class="kpi-grid" id="cashflow-kpis">
     <div class="kpi-card red"><div class="kpi-label">Total Cumulative Expenses</div><div class="kpi-value red skeleton" id="kpi-total-exp">₪0</div></div>
-    <div class="kpi-card blue"><div class="kpi-label">Major Expenses Share</div><div class="kpi-value blue skeleton" id="kpi-major-share">0%</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">Top Expense Share</div><div class="kpi-value blue skeleton" id="kpi-major-share">0%</div></div>
     <div class="kpi-card"><div class="kpi-label">Average Monthly Spend</div><div class="kpi-value skeleton" id="kpi-avg-exp">₪0</div></div>
   </div>
 
@@ -71,7 +71,7 @@
       <div class="toolbar" style="margin-bottom: 8px;">
         <div>
           <div class="card-title">Major Expenses Over Time</div>
-          <div class="card-subtitle">Trajectory of your largest recurring expense categories</div>
+          <div class="card-subtitle">Trajectory of your primary expense categories</div>
         </div>
       </div>
       <div style="height: 310px; position: relative;">
@@ -79,9 +79,9 @@
       </div>
     </div>
 
-    <!-- Valuable Insights: Major Expense Breakdown -->
+    <!-- Valuable Insights: Expense Breakdown -->
     <div class="card">
-      <div class="card-title mb-16">Major Expense Breakdown</div>
+      <div class="card-title mb-16">Expense Breakdown Summary</div>
       <div class="table-wrap" style="max-height: 300px; overflow-y: auto;">
         <table class="insights-table">
           <thead>
@@ -106,7 +106,7 @@
     <div class="toolbar">
       <div>
         <div class="card-title">Multi-Month Expense Matrix</div>
-        <div class="card-subtitle">Every expense category tracked month-by-month across time</div>
+        <div class="card-subtitle">Detailed breakdown of mortgage, restaurants, and other expenses month-by-month</div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="openTxModal()">+ Add Expense / Income</button>
     </div>
@@ -153,20 +153,22 @@
       <div class="form-group-custom">
         <label>Category / Type</label>
         <select id="tx-type">
-          <option value="housing">Housing / Rent / Maintenance</option>
-          <option value="food">Food & Supermarket</option>
+          <option value="mortgage">Mortgage</option>
+          <option value="restaurants">Restaurants & Dining</option>
+          <option value="food">Supermarket / Groceries</option>
+          <option value="housing">Housing & Rent</option>
           <option value="utilities">Utilities (Power, Water, Net)</option>
           <option value="transport">Transport & Fuel</option>
-          <option value="entertainment">Entertainment & Dining Out</option>
+          <option value="entertainment">Entertainment</option>
           <option value="shopping">Shopping & Apparel</option>
+          <option value="other_expense">Other Expenses</option>
           <option value="income_salary">Salary (Income)</option>
           <option value="income_other">Other Income</option>
-          <option value="other_expense">Other Expense</option>
         </select>
       </div>
       <div class="form-group-custom">
         <label>Description</label>
-        <input type="text" id="tx-desc" placeholder="e.g. Supermarket bill, Rent..." required />
+        <input type="text" id="tx-desc" placeholder="e.g. Monthly mortgage payment, Cafe..." required />
       </div>
       <div class="form-group-custom">
         <label>Amount (₪)</label>
@@ -189,16 +191,18 @@ let allTransactions = [];
 let majorChart = null;
 
 const CATEGORY_NAMES = {
+  'mortgage': 'Mortgage',
+  'restaurants': 'Restaurants & Dining',
+  'food': 'Supermarket / Groceries',
   'housing': 'Housing & Rent',
-  'food': 'Food & Dining',
   'utilities': 'Utilities',
   'transport': 'Transport & Fuel',
   'entertainment': 'Entertainment',
-  'shopping': 'Shopping & Goods',
+  'shopping': 'Shopping',
   'other_expense': 'Other Expenses'
 };
 
-const COLOR_PALETTE = ['#e05c6a', '#5b8df6', '#4caf88', '#c9a84c', '#9b7cf8', '#4cc9c9', '#f08c4b'];
+const COLOR_PALETTE = ['#e05c6a', '#5b8df6', '#4caf88', '#c9a84c', '#9b7cf8', '#4cc9c9', '#f08c4b', '#e87dbd'];
 
 const fmtMoney = (n) => '₪' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(n);
 
@@ -216,7 +220,6 @@ async function loadTransactions() {
 }
 
 function processExpenseData() {
-  // 1. Filter out income
   const expenseTxs = allTransactions.filter(t => !t.type.startsWith('income'));
   
   if (!expenseTxs.length) {
@@ -225,12 +228,10 @@ function processExpenseData() {
     return;
   }
 
-  // 2. Identify all unique months and sort chronologically
   const monthSet = new Set();
   expenseTxs.forEach(t => monthSet.add(`${t.year}-${String(t.month).padStart(2, '0')}`));
   const sortedMonths = Array.from(monthSet).sort();
 
-  // 3. Build Matrix Data Structure: matrix[category][month] = total
   const matrix = {};
   const categoryTotals = {};
   let totalCumulativeExpense = 0;
@@ -247,16 +248,10 @@ function processExpenseData() {
     totalCumulativeExpense += amt;
   });
 
-  // 4. Sort Categories by Major Total Spend
   const sortedCategories = Object.keys(categoryTotals).sort((a,b) => categoryTotals[b] - categoryTotals[a]);
 
-  // 5. Render KPIs & Insights Table
   renderInsights(sortedCategories, categoryTotals, totalCumulativeExpense, sortedMonths.length);
-
-  // 6. Render Major Expenses Over Time Chart
   renderMajorChart(sortedCategories, sortedMonths, matrix);
-
-  // 7. Render Multi-Month Matrix Table
   renderMatrixTable(sortedCategories, sortedMonths, matrix, categoryTotals);
 
   document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
@@ -266,7 +261,7 @@ function renderInsights(categories, categoryTotals, totalExpense, numMonths) {
   const insightsTbody = document.getElementById('insights-table-body');
   insightsTbody.innerHTML = '';
 
-  let majorExpensesSum = 0;
+  let topCategorySum = categories.length > 0 ? categoryTotals[categories[0]] : 0;
 
   categories.forEach((catKey, idx) => {
     const total = categoryTotals[catKey];
@@ -274,8 +269,6 @@ function renderInsights(categories, categoryTotals, totalExpense, numMonths) {
     const share = totalExpense > 0 ? (total / totalExpense) * 100 : 0;
     const color = COLOR_PALETTE[idx % COLOR_PALETTE.length];
     const catName = CATEGORY_NAMES[catKey] || catKey;
-
-    if (idx < 3) majorExpensesSum += total; // Top 3 constitute major share
 
     insightsTbody.innerHTML += `
       <tr>
@@ -295,12 +288,11 @@ function renderInsights(categories, categoryTotals, totalExpense, numMonths) {
   document.getElementById('kpi-total-exp').textContent = fmtMoney(totalExpense);
   document.getElementById('kpi-avg-exp').textContent = fmtMoney(totalExpense / Math.max(1, numMonths));
   
-  const majorSharePct = totalExpense > 0 ? (majorExpensesSum / totalExpense) * 100 : 0;
-  document.getElementById('kpi-major-share').textContent = majorSharePct.toFixed(1) + '%';
+  const topSharePct = totalExpense > 0 ? (topCategorySum / totalExpense) * 100 : 0;
+  document.getElementById('kpi-major-share').textContent = topSharePct.toFixed(1) + '%';
 }
 
 function renderMajorChart(categories, months, matrix) {
-  // Select top 4-5 major expenses for clean graph display
   const topMajorCategories = categories.slice(0, 5);
 
   const datasets = topMajorCategories.map((catKey, idx) => {
@@ -356,14 +348,12 @@ function renderMatrixTable(categories, months, matrix, categoryTotals) {
   const bodyRows = document.getElementById('matrix-body-rows');
   const footRow = document.getElementById('matrix-foot-row');
 
-  // Header Row
   headRow.innerHTML = '<th>Expense Category</th>';
   months.forEach(m => {
     headRow.innerHTML += `<th>${m}</th>`;
   });
   headRow.innerHTML += '<th>Category Total</th>';
 
-  // Body Rows
   bodyRows.innerHTML = '';
   categories.forEach(catKey => {
     const catName = CATEGORY_NAMES[catKey] || catKey;
@@ -378,7 +368,6 @@ function renderMatrixTable(categories, months, matrix, categoryTotals) {
     bodyRows.innerHTML += `<tr>${rowHtml}</tr>`;
   });
 
-  // Footer Row (Monthly Totals)
   footRow.innerHTML = '<td>Total Expenses</td>';
   let grandTotal = 0;
   months.forEach(m => {
