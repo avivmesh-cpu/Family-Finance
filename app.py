@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 from functools import wraps
 from datetime import datetime
 import requests as req_lib
-import os, json, io
+import os, json, io, concurrent.futures
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-prod')
@@ -169,6 +169,7 @@ def debug_stocks():
     distinct = q(conn, 'SELECT DISTINCT symbol FROM stock_holding')
     close_db(conn)
     return jsonify({'all': all_rows, 'distinct_symbols': distinct, 'count': len(all_rows)})
+
 def debug_yahoo(symbol):
     import traceback
     headers = {
@@ -321,6 +322,8 @@ def add_account_to_months():
         added += 1
     close_db(conn)
     return jsonify({'status':'ok', 'added_to_months': added})
+
+@app.route('/api/assets/<int:aid>', methods=['DELETE'])
 @auth_required
 def delete_asset(aid):
     conn = get_db(); run(conn, 'DELETE FROM asset_snapshot WHERE id=?', (aid,)); close_db(conn)
@@ -387,7 +390,7 @@ def add_stock():
 @app.route('/api/stocks/details', methods=['GET'])
 @auth_required
 def stock_details():
-    """Fetch price, previous close, and market cap for the classic view."""
+    """Fetch price, previous close, and market cap using concurrent threads."""
     conn = get_db()
     rows = q(conn, 'SELECT DISTINCT symbol FROM stock_holding UNION SELECT DISTINCT symbol FROM stock_trade')
     close_db(conn)
@@ -397,9 +400,9 @@ def stock_details():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/json'
     }
-    
-    for r in rows:
-        sym = r['symbol']
+    symbols = [r['symbol'] for r in rows if r['symbol']]
+
+    def fetch_detail(sym):
         try:
             url = f'https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=2d'
             data = req_lib.get(url, timeout=5, headers=headers).json()['chart']['result'][0]
@@ -407,9 +410,13 @@ def stock_details():
             price = meta.get('regularMarketPrice', 0)
             prev = meta.get('chartPreviousClose', price)
             cap = meta.get('marketCap', 0) 
-            res[sym] = {'price': price, 'prev': prev, 'mktcap': cap}
+            return sym, {'price': price, 'prev': prev, 'mktcap': cap}
         except Exception:
-            res[sym] = {'price': 0, 'prev': 0, 'mktcap': 0}
+            return sym, {'price': 0, 'prev': 0, 'mktcap': 0}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        for sym, data in executor.map(fetch_detail, symbols):
+            res[sym] = data
             
     return jsonify(res)
 
@@ -448,30 +455,44 @@ def _yahoo(sym):
 @app.route('/api/stocks/prices', methods=['GET'])
 @auth_required
 def stock_prices_list():
-    conn = get_db(); rows = q(conn, 'SELECT DISTINCT symbol FROM stock_holding'); close_db(conn)
+    conn = get_db()
+    rows = q(conn, 'SELECT DISTINCT symbol FROM stock_holding')
+    close_db(conn)
+    
     prices = {}
-    for r in rows:
-        sym = r['symbol']
-        if not sym: continue
-        try: prices[sym] = _yahoo(sym)
-        except Exception as e: prices[sym] = None
+    symbols = [r['symbol'].strip().upper() for r in rows if r.get('symbol')]
+    
+    def fetch(sym):
+        try: return sym, _yahoo(sym)
+        except Exception: return sym, None
+        
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        for sym, price in executor.map(fetch, symbols):
+            prices[sym] = price
+            
     return jsonify(prices)
 
 # Alternative URL with no routing conflict
 @app.route('/api/stock-prices', methods=['GET'])
 @auth_required
 def stock_prices_alt():
-    conn = get_db(); rows = q(conn, 'SELECT DISTINCT symbol FROM stock_holding'); close_db(conn)
+    conn = get_db()
+    rows = q(conn, 'SELECT DISTINCT symbol FROM stock_holding')
+    close_db(conn)
+    
     prices = {}
     errors = {}
-    for r in rows:
-        sym = (r['symbol'] or '').strip().upper()
-        if not sym: continue
-        try:
-            prices[sym] = _yahoo(sym)
-        except Exception as e:
-            prices[sym] = None
-            errors[sym] = str(e)
+    symbols = [r['symbol'].strip().upper() for r in rows if r.get('symbol')]
+    
+    def fetch(sym):
+        try: return sym, _yahoo(sym), None
+        except Exception as e: return sym, None, str(e)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        for sym, price, err in executor.map(fetch, symbols):
+            prices[sym] = price
+            if err: errors[sym] = err
+            
     return jsonify({'prices': prices, 'errors': errors})
 
 @app.route('/api/stock-price/<path:symbol>', methods=['GET'])
@@ -559,18 +580,45 @@ def get_stock_trades():
 def add_stock_trade():
     d = request.json
     sym = d['symbol'].upper().strip()
+    shares_to_sell = float(d['shares'])
+    sell_price = float(d['sell_price'])
     conn = get_db()
-    # Auto-calculate cost basis from holdings if not provided
+    
     cost_basis = float(d.get('cost_basis', 0))
     if not cost_basis:
-        holdings = q(conn, 'SELECT purchase_price, quantity FROM stock_holding WHERE symbol=?', (sym,))
-        if holdings:
-            total_qty = sum(float(h['quantity']) for h in holdings)
-            total_cost = sum(float(h['purchase_price']) * float(h['quantity']) for h in holdings)
-            cost_basis = (total_cost / total_qty) if total_qty else 0
+        # STRICT FIFO COST BASIS CALCULATION
+        buys = q(conn, 'SELECT purchase_price, quantity FROM stock_holding WHERE symbol=? ORDER BY purchase_date ASC', (sym,))
+        sells = q(conn, 'SELECT shares FROM stock_trade WHERE symbol=?', (sym,))
+        
+        already_sold = sum(float(s['shares']) for s in sells)
+        cost_sum = 0
+        shares_left = shares_to_sell
+        
+        for b in buys:
+            q_buy = float(b['quantity'])
+            p_buy = float(b['purchase_price'])
+            
+            # Deduct previously sold shares from this lot
+            if already_sold >= q_buy:
+                already_sold -= q_buy
+                continue
+            else:
+                q_buy -= already_sold
+                already_sold = 0
+            
+            # Calculate cost basis strictly out of the oldest remaining active shares
+            if shares_left >= q_buy:
+                cost_sum += (q_buy * p_buy)
+                shares_left -= q_buy
+            else:
+                cost_sum += (shares_left * p_buy)
+                shares_left = 0
+                break
+                
+        cost_basis = (cost_sum / shares_to_sell) if shares_to_sell > 0 else 0
+
     run(conn, 'INSERT INTO stock_trade (symbol,trade_date,shares,sell_price,cost_basis,notes) VALUES (?,?,?,?,?,?)',
-        (sym, d['trade_date'], float(d['shares']), float(d['sell_price']),
-         cost_basis, d.get('notes', '')))
+        (sym, d['trade_date'], shares_to_sell, sell_price, cost_basis, d.get('notes', '')))
     close_db(conn)
     return jsonify({'status': 'ok', 'cost_basis_used': cost_basis})
 
