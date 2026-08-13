@@ -1,24 +1,33 @@
 {% extends "base.html" %}
-{% block title %}Itemized Expenses & Trends{% endblock %}
-{% block page_title %}Itemized Expenses & Major Trends{% endblock %}
-{% block page_subtitle %}Track major spending trajectories and review every individual purchase or bill month-by-month{% endblock %}
+{% block title %}Itemized Expense Matrix{% endblock %}
+{% block page_title %}Itemized Expense Matrix{% endblock %}
+{% block page_subtitle %}Track individual expense items across month columns with major spending trend plots{% endblock %}
 
 {% block content %}
 <style>
-  /* Itemized Ledger Table Styling */
-  .ledger-table { width: 100%; border-collapse: collapse; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); }
-  .ledger-table th { background: var(--bg3); border-bottom: 1px solid var(--border2); text-align: left; padding: 12px 16px; font-weight: 600; color: var(--text2); }
-  .ledger-table th:nth-child(4), .ledger-table th:nth-child(5) { text-align: right; }
-  .ledger-table td { padding: 10px 16px; border-bottom: 1px solid var(--border2); text-align: left; }
-  .ledger-table td:nth-child(4) { text-align: right; font-family: 'DM Mono', monospace; font-weight: 600; color: var(--text); }
-  .ledger-table td:nth-child(5) { text-align: right; }
-  .ledger-table tr.item-row:hover { background: var(--bg2); }
+  /* Itemized Matrix Table Styling */
+  .matrix-table { width: 100%; border-collapse: collapse; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); }
+  .matrix-table th { background: var(--bg3); border-bottom: 1px solid var(--border2); text-align: right; padding: 10px 14px; font-weight: 600; color: var(--text2); white-space: nowrap; }
+  .matrix-table th:first-child, .matrix-table th:nth-child(2) { text-align: left; position: sticky; background: var(--bg3); z-index: 3; }
+  .matrix-table th:first-child { left: 0; }
+  .matrix-table th:nth-child(2) { left: 130px; border-right: 1px solid var(--border2); }
 
-  .month-group-header { background: var(--surface); font-weight: 700; font-size: 14px; color: var(--accent); padding: 12px 16px; border-top: 2px solid var(--border); border-bottom: 1px solid var(--border2); }
+  .matrix-table td { padding: 10px 14px; border-bottom: 1px solid var(--border2); text-align: right; font-family: 'DM Mono', monospace; white-space: nowrap; }
+  .matrix-table td:first-child, .matrix-table td:nth-child(2) { text-align: left; position: sticky; background: var(--surface); z-index: 2; font-family: 'DM Sans', sans-serif; }
+  .matrix-table td:first-child { left: 0; }
+  .matrix-table td:nth-child(2) { left: 130px; border-right: 1px solid var(--border2); font-weight: 500; }
   
-  .badge-cat { background: var(--bg3); border: 1px solid var(--border2); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; display: inline-block; min-width: 100px; text-align: center; }
+  .matrix-table tr:hover td:first-child,
+  .matrix-table tr:hover td:nth-child(2) { background: var(--bg2); }
+  .matrix-table tr:hover { background: var(--bg2); }
 
-  .table-wrap { overflow-x: auto; margin-bottom: 16px; max-height: 600px; overflow-y: auto; }
+  .matrix-table tr.total-row { font-weight: 700; background: var(--bg3); }
+  .matrix-table tr.total-row td { border-top: 2px solid var(--border); border-bottom: none; color: var(--text); }
+  .matrix-table tr.total-row td:first-child, .matrix-table tr.total-row td:nth-child(2) { background: var(--bg3); }
+
+  .badge-cat { background: var(--bg3); border: 1px solid var(--border2); padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; color: var(--text2); text-transform: uppercase; display: inline-block; text-align: center; }
+
+  .table-wrap { overflow-x: auto; margin-bottom: 16px; max-height: 550px; overflow-y: auto; }
   .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; flex-wrap: wrap; gap: 12px; }
 
   .skeleton {
@@ -47,7 +56,7 @@
   <!-- KPIs -->
   <div class="kpi-grid" id="cashflow-kpis">
     <div class="kpi-card red"><div class="kpi-label">Total Cumulative Expenses</div><div class="kpi-value red skeleton" id="kpi-total-exp">₪0</div></div>
-    <div class="kpi-card blue"><div class="kpi-label">Top Expense Category</div><div class="kpi-value blue skeleton" id="kpi-top-cat">-</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">Top Expense Item</div><div class="kpi-value blue skeleton" id="kpi-top-item">-</div></div>
     <div class="kpi-card"><div class="kpi-label">Monthly Average Spend</div><div class="kpi-value skeleton" id="kpi-avg-exp">₪0</div></div>
   </div>
 
@@ -59,35 +68,37 @@
         <div class="card-subtitle">Monthly trajectory of your top 4 highest spending categories</div>
       </div>
     </div>
-    <div style="height: 320px; position: relative;">
+    <div style="height: 300px; position: relative;">
       <canvas id="major-expenses-chart"></canvas>
     </div>
   </div>
 
-  <!-- Itemized Expense Ledger (Grouped by Month) -->
+  <!-- Itemized Expense Matrix Table (Rows = Specific Expenses, Columns = Months) -->
   <div class="card">
     <div class="toolbar">
       <div>
-        <div class="card-title">Itemized Expense Ledger</div>
-        <div class="card-subtitle">Every specific purchase, bill, or payment listed explicitly</div>
+        <div class="card-title">Itemized Expense Matrix</div>
+        <div class="card-subtitle">Individual expense descriptions across month columns</div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="openTxModal()">+ Add Expense</button>
     </div>
 
     <div class="table-wrap">
-      <table class="ledger-table">
+      <table class="matrix-table">
         <thead>
-          <tr>
-            <th style="width: 140px;">Category</th>
-            <th>Description / Details</th>
-            <th>Month</th>
-            <th>Amount</th>
-            <th style="width: 60px;"></th>
+          <tr id="matrix-head-row">
+            <th style="width: 120px;">Category</th>
+            <th style="width: 180px;">Expense Description</th>
           </tr>
         </thead>
-        <tbody id="ledger-table-body">
+        <tbody id="matrix-body-rows">
           <tr><td colspan="5"><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
         </tbody>
+        <tfoot>
+          <tr class="total-row" id="matrix-foot-row">
+            <td colspan="2">Total Monthly Expenses</td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   </div>
@@ -172,70 +183,134 @@ async function initPage() {
 async function loadTransactions() {
   try {
     allTransactions = await FF.get('/api/transactions');
-    processExpenseData();
+    processExpenseMatrix();
   } catch (err) {
     console.error('Failed to load transactions', err);
   }
 }
 
-function processExpenseData() {
+function processExpenseMatrix() {
   const expenses = allTransactions.filter(t => !t.type.startsWith('income'));
 
   if (!expenses.length) {
-    document.getElementById('ledger-table-body').innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text3);">No expense items found. Click "+ Add Expense" to begin.</td></tr>';
+    document.getElementById('matrix-body-rows').innerHTML = '<tr><td colspan="100%" style="text-align:center; padding:20px; color:var(--text3);">No expense logs found. Click "+ Add Expense" to begin.</td></tr>';
     document.getElementById('kpi-total-exp').textContent = fmtMoney(0);
-    document.getElementById('kpi-top-cat').textContent = '-';
+    document.getElementById('kpi-top-item').textContent = '-';
     document.getElementById('kpi-avg-exp').textContent = fmtMoney(0);
     document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
     return;
   }
 
-  // 1. Data for the Chart (Monthly matrix sums)
+  // 1. Get sorted unique months
   const monthSet = new Set();
-  const matrix = {};
-  const categoryTotals = {};
+  expenses.forEach(t => monthSet.add(`${t.year}-${String(t.month).padStart(2, '0')}`));
+  const sortedMonths = Array.from(monthSet).sort();
+
+  // 2. Build Itemized Matrix: rows are defined by unique (type + description)
+  // itemMatrix[rowKey] = { type, description, months: { 'YYYY-MM': amount }, total }
+  const itemMatrix = {};
   let totalCumulative = 0;
 
   expenses.forEach(t => {
-    const catKey = t.type;
+    const rowKey = `${t.type}:::${t.description.trim()}`;
     const mKey = `${t.year}-${String(t.month).padStart(2, '0')}`;
     const amt = parseFloat(t.amount) || 0;
-    
-    monthSet.add(mKey);
 
-    if (!matrix[catKey]) matrix[catKey] = {};
-    matrix[catKey][mKey] = (matrix[catKey][mKey] || 0) + amt;
+    if (!itemMatrix[rowKey]) {
+      itemMatrix[rowKey] = {
+        type: t.type,
+        description: t.description.trim(),
+        months: {},
+        total: 0
+      };
+    }
 
-    categoryTotals[catKey] = (categoryTotals[catKey] || 0) + amt;
+    itemMatrix[rowKey].months[mKey] = (itemMatrix[rowKey].months[mKey] || 0) + amt;
+    itemMatrix[rowKey].total += amt;
     totalCumulative += amt;
   });
 
-  const sortedMonths = Array.from(monthSet).sort();
-  const sortedCategories = Object.keys(categoryTotals).sort((a,b) => categoryTotals[b] - categoryTotals[a]);
+  // Sort rows by highest total spend descending
+  const sortedRowKeys = Object.keys(itemMatrix).sort((a, b) => itemMatrix[b].total - itemMatrix[a].total);
 
-  // Update KPIs
-  const topCatKey = sortedCategories[0];
-  const topCatName = CATEGORY_NAMES[topCatKey] || topCatKey;
+  // 3. Update KPIs
+  const topItem = itemMatrix[sortedRowKeys[0]];
   document.getElementById('kpi-total-exp').textContent = fmtMoney(totalCumulative);
-  document.getElementById('kpi-top-cat').textContent = `${topCatName} (${fmtMoney(categoryTotals[topCatKey])})`;
+  document.getElementById('kpi-top-item').textContent = `${topItem.description} (${fmtMoney(topItem.total)})`;
   document.getElementById('kpi-avg-exp').textContent = fmtMoney(totalCumulative / Math.max(1, sortedMonths.length));
 
-  // Render Chart
-  renderMajorExpensesChart(sortedCategories, sortedMonths, matrix);
+  // 4. Render Itemized Matrix Table
+  renderItemizedMatrixTable(sortedRowKeys, sortedMonths, itemMatrix);
 
-  // 2. Data for the Ledger (Individual Itemized Rows)
-  renderItemizedLedger(expenses);
+  // 5. Render Major Expenses Chart (Grouped by Category for the chart)
+  renderMajorExpensesChart(expenses, sortedMonths);
 
   document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
 }
 
-function renderMajorExpensesChart(categories, months, matrix) {
-  const top4 = categories.slice(0, 4); // Isolate the top 4 expenses
+function renderItemizedMatrixTable(rowKeys, months, itemMatrix) {
+  const headRow = document.getElementById('matrix-head-row');
+  const bodyRows = document.getElementById('matrix-body-rows');
+  const footRow = document.getElementById('matrix-foot-row');
+
+  // Header
+  headRow.innerHTML = '<th style="width: 130px;">Category</th><th style="width: 180px;">Expense Description</th>';
+  months.forEach(m => {
+    headRow.innerHTML += `<th>${m}</th>`;
+  });
+  headRow.innerHTML += '<th>Total Spend</th>';
+
+  // Body Rows
+  bodyRows.innerHTML = '';
+  rowKeys.forEach(rowKey => {
+    const item = itemMatrix[rowKey];
+    const catName = CATEGORY_NAMES[item.type] || item.type;
+    
+    let rowHtml = `<td><span class="badge-cat">${catName}</span></td><td>${item.description}</td>`;
+
+    months.forEach(m => {
+      const val = item.months[m] || 0;
+      rowHtml += `<td>${val > 0 ? fmtMoney(val) : '<span style="color:var(--text3)">-</span>'}</td>`;
+    });
+
+    rowHtml += `<td style="font-weight:700; color:var(--text);">${fmtMoney(item.total)}</td>`;
+    bodyRows.innerHTML += `<tr>${rowHtml}</tr>`;
+  });
+
+  // Footer (Monthly Sums)
+  footRow.innerHTML = '<td colspan="2">Total Monthly Expenses</td>';
+  let grandTotal = 0;
+  months.forEach(m => {
+    let monthSum = 0;
+    rowKeys.forEach(rowKey => {
+      monthSum += itemMatrix[rowKey].months[m] || 0;
+    });
+    grandTotal += monthSum;
+    footRow.innerHTML += `<td>${fmtMoney(monthSum)}</td>`;
+  });
+  footRow.innerHTML += `<td style="color:var(--red); font-size:14px;">${fmtMoney(grandTotal)}</td>`;
+}
+
+function renderMajorExpensesChart(expenses, months) {
+  // Aggregate by category for the trend chart
+  const catMatrix = {};
+  const catTotals = {};
+
+  expenses.forEach(t => {
+    const mKey = `${t.year}-${String(t.month).padStart(2, '0')}`;
+    const amt = parseFloat(t.amount) || 0;
+    if (!catMatrix[t.type]) catMatrix[t.type] = {};
+    catMatrix[t.type][mKey] = (catMatrix[t.type][mKey] || 0) + amt;
+    catTotals[t.type] = (catTotals[t.type] || 0) + amt;
+  });
+
+  const sortedCats = Object.keys(catTotals).sort((a,b) => catTotals[b] - catTotals[a]);
+  const top4 = sortedCats.slice(0, 4);
 
   const datasets = top4.map((catKey, idx) => {
     const color = COLOR_PALETTE[idx % COLOR_PALETTE.length];
     const catName = CATEGORY_NAMES[catKey] || catKey;
-    const dataPoints = months.map(m => matrix[catKey]?.[m] || 0);
+    const dataPoints = months.map(m => catMatrix[catKey]?.[m] || 0);
 
     return {
       label: catName,
@@ -280,59 +355,6 @@ function renderMajorExpensesChart(categories, months, matrix) {
   }
 }
 
-function renderItemizedLedger(expenses) {
-  // Sort chronologically descending, then by newest item
-  expenses.sort((a, b) => {
-    const periodA = a.year * 12 + a.month;
-    const periodB = b.year * 12 + b.month;
-    if (periodA !== periodB) return periodB - periodA;
-    return b.id - a.id;
-  });
-
-  // Group individual items by month string
-  const groupedByMonth = {};
-  expenses.forEach(t => {
-    const mKey = `${t.year}-${String(t.month).padStart(2, '0')}`;
-    if (!groupedByMonth[mKey]) groupedByMonth[mKey] = [];
-    groupedByMonth[mKey].push(t);
-  });
-
-  const tbody = document.getElementById('ledger-table-body');
-  tbody.innerHTML = '';
-
-  // Render month-by-month
-  Object.keys(groupedByMonth).sort().reverse().forEach(mKey => {
-    const monthItems = groupedByMonth[mKey];
-    let monthSum = monthItems.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-
-    // Month group header
-    tbody.innerHTML += `
-      <tr>
-        <td colspan="5" class="month-group-header">
-          📅 ${mKey} 
-          <span style="float: right; font-family:'DM Mono',monospace; color: var(--text);">
-            Total Monthly Spend: <span style="color: var(--red);">${fmtMoney(monthSum)}</span>
-          </span>
-        </td>
-      </tr>
-    `;
-
-    // Itemized rows
-    monthItems.forEach(t => {
-      const catName = CATEGORY_NAMES[t.type] || t.type;
-      tbody.innerHTML += `
-        <tr class="item-row">
-          <td><span class="badge-cat">${catName}</span></td>
-          <td style="font-weight: 500;">${t.description}</td>
-          <td style="color: var(--text3); font-size: 12px;">${mKey}</td>
-          <td>${fmtMoney(t.amount)}</td>
-          <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteTx(${t.id})" title="Delete entry">✕</button></td>
-        </tr>
-      `;
-    });
-  });
-}
-
 function openTxModal() {
   document.getElementById('tx-modal').style.display = 'flex';
   const now = new Date();
@@ -352,13 +374,6 @@ async function handleTxSubmit(e) {
   closeTxModal();
   await FF.post('/api/transactions', { year, month, type, description, amount });
   loadTransactions();
-}
-
-async function deleteTx(id) {
-  if (confirm('Delete this expense entry?')) {
-    await FF.del(`/api/transactions/${id}`);
-    loadTransactions();
-  }
 }
 
 initPage();
