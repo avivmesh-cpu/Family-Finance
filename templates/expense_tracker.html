@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Itemized Expense Matrix{% endblock %}
-{% block page_title %}Itemized Expense Matrix{% endblock %}
-{% block page_subtitle %}Track individual expense items across month columns with year filters and sorting{% endblock %}
+{% block page_title %}Itemized Expense Matrix & Trends{% endblock %}
+{% block page_subtitle %}Interactive multi-month expense matrix with persistent chart overlays and year filtering{% endblock %}
 
 {% block content %}
 <style>
@@ -24,6 +24,11 @@
   .toolbar { display: flex; justify-content: space-between; margin-bottom: 16px; align-items: center; flex-wrap: wrap; gap: 12px; }
   .filter-group { display: flex; align-items: center; gap: 8px; }
   .filter-group select { padding: 6px 12px; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Mono', monospace; font-size: 12px; }
+
+  /* Chart Overlay Toggles */
+  .chart-toggles { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border2); align-items: center; }
+  .chart-toggle-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); cursor: pointer; user-select: none; background: var(--bg3); padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border2); }
+  .chart-toggle-item input { accent-color: var(--accent); cursor: pointer; }
 
   .skeleton {
     background: linear-gradient(90deg, var(--bg3) 25%, var(--border2) 50%, var(--bg3) 75%);
@@ -55,16 +60,21 @@
     <div class="kpi-card"><div class="kpi-label">Monthly Average Spend</div><div class="kpi-value skeleton" id="kpi-avg-exp">₪0</div></div>
   </div>
 
-  <!-- Chart for 4 Major Expenses Over Time -->
+  <!-- Interactive Plot Card -->
   <div class="card mb-24">
-    <div class="toolbar">
+    <div class="toolbar" style="margin-bottom: 8px;">
       <div>
-        <div class="card-title">4 Major Expenses Over Time</div>
-        <div class="card-subtitle">Monthly trajectory of your top 4 highest spending categories</div>
+        <div class="card-title">Expense Trajectory Plot</div>
+        <div class="card-subtitle">Overall monthly expenses with optional individual item overlays</div>
       </div>
     </div>
     <div style="height: 300px; position: relative;">
-      <canvas id="major-expenses-chart"></canvas>
+      <canvas id="expense-plot"></canvas>
+    </div>
+    <!-- Checkbox toggles for adding individual expenses to plot -->
+    <div class="chart-toggles" id="chart-toggles-box">
+      <span style="font-size: 12px; font-weight: 600; color: var(--text3);">Overlay Individual Expenses:</span>
+      <!-- Injected dynamically -->
     </div>
   </div>
 
@@ -74,7 +84,7 @@
       <div class="filter-group">
         <div class="card-title" style="margin-right: 8px;">Itemized Matrix</div>
         <label style="font-size: 12px; color: var(--text3);">Year:</label>
-        <select id="year-filter" onchange="processExpenseMatrix()">
+        <select id="year-filter" onchange="onYearFilterChange()">
           <option value="ALL">All Years</option>
         </select>
       </div>
@@ -85,7 +95,7 @@
       <table class="matrix-table">
         <thead>
           <tr id="matrix-head-row">
-            <th style="width: 220px;" onclick="sortTable('description')">Expense Description ↕</th>
+            <th style="width: 250px;" onclick="sortTable('description')">Expense Description ↕</th>
           </tr>
         </thead>
         <tbody id="matrix-body-rows">
@@ -147,23 +157,11 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 let allTransactions = [];
-let majorChart = null;
+let expenseChart = null;
 let currentSortCol = 'total';
 let currentSortAsc = false;
 
-const CATEGORY_NAMES = {
-  'mortgage': 'Mortgage',
-  'restaurants': 'Restaurants',
-  'food': 'Supermarket',
-  'housing': 'Housing',
-  'utilities': 'Utilities',
-  'transport': 'Transport',
-  'entertainment': 'Entertainment',
-  'shopping': 'Shopping',
-  'other_expense': 'Other'
-};
-
-const COLOR_PALETTE = ['#e05c6a', '#5b8df6', '#4caf88', '#c9a84c', '#9b7cf8', '#4cc9c9', '#f08c4b', '#e87dbd'];
+const COLOR_PALETTE = ['#5b8df6', '#4caf88', '#c9a84c', '#9b7cf8', '#4cc9c9', '#f08c4b', '#e87dbd', '#7dc8e8'];
 
 const fmtMoney = (n) => '₪' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(n);
 
@@ -177,6 +175,13 @@ async function initPage() {
   const now = new Date();
   document.getElementById('tx-year').value = now.getFullYear();
   document.getElementById('tx-month').value = now.getMonth() + 1;
+
+  // Restore saved year preference from LocalStorage if available
+  const savedYear = localStorage.getItem('expense_tracker_year');
+  if (savedYear) {
+    const select = document.getElementById('year-filter');
+    select.value = savedYear;
+  }
 
   await loadTransactions();
 }
@@ -202,15 +207,27 @@ function populateYearDropdown() {
   sortedYears.forEach(y => {
     select.innerHTML += `<option value="${y}">${y}</option>`;
   });
+  
   if (sortedYears.includes(parseInt(currentVal)) || currentVal === 'ALL') {
     select.value = currentVal;
+  } else {
+    // Check localStorage again
+    const savedYear = localStorage.getItem('expense_tracker_year');
+    if (savedYear && (sortedYears.includes(parseInt(savedYear)) || savedYear === 'ALL')) {
+      select.value = savedYear;
+    }
   }
+}
+
+function onYearFilterChange() {
+  const selectVal = document.getElementById('year-filter').value;
+  localStorage.setItem('expense_tracker_year', selectVal);
+  processExpenseMatrix();
 }
 
 function processExpenseMatrix() {
   const selectedYear = document.getElementById('year-filter').value;
   
-  // Filter expenses based on year selection
   let expenses = allTransactions.filter(t => !t.type.startsWith('income'));
   if (selectedYear !== 'ALL') {
     expenses = expenses.filter(t => t.year.toString() === selectedYear);
@@ -221,6 +238,7 @@ function processExpenseMatrix() {
     document.getElementById('kpi-total-exp').textContent = fmtMoney(0);
     document.getElementById('kpi-top-item').textContent = '-';
     document.getElementById('kpi-avg-exp').textContent = fmtMoney(0);
+    renderPlot([], [], {});
     document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
     return;
   }
@@ -243,7 +261,6 @@ function processExpenseMatrix() {
     if (!itemMatrix[rowKey]) {
       itemMatrix[rowKey] = {
         description: cleanDesc,
-        type: t.type,
         months: {},
         total: 0
       };
@@ -267,8 +284,8 @@ function processExpenseMatrix() {
   // 4. Render Matrix Table
   renderItemizedMatrixTable(rowKeys, sortedMonths, itemMatrix);
 
-  // 5. Render Major Expenses Chart
-  renderMajorExpensesChart(allTransactions, sortedMonths);
+  // 5. Render Chart & Checkboxes
+  renderChartControlsAndPlot(rowKeys, sortedMonths, itemMatrix, expenses);
 
   document.querySelectorAll('.skeleton').forEach(el => el.classList.remove('skeleton'));
 }
@@ -336,47 +353,118 @@ function renderItemizedMatrixTable(rowKeys, months, itemMatrix) {
   footRow.innerHTML += `<td style="color:var(--red); font-size:14px;">${fmtMoney(grandTotal)}</td>`;
 }
 
-function renderMajorExpensesChart(transactions, months) {
-  const expenses = transactions.filter(t => !t.type.startsWith('income'));
-  const catMatrix = {};
-  const catTotals = {};
+function renderChartControlsAndPlot(rowKeys, months, itemMatrix, expenses) {
+  const togglesBox = document.getElementById('chart-toggles-box');
+  
+  // Retrieve saved chart item selections from LocalStorage
+  let savedSelectedItems = [];
+  try {
+    const raw = localStorage.getItem('expense_tracker_chart_items');
+    if (raw) savedSelectedItems = JSON.parse(raw);
+  } catch(e) {}
 
+  // Re-build checkbox toggles
+  togglesBox.innerHTML = '<span style="font-size: 12px; font-weight: 600; color: var(--text3);">Overlay Individual Expenses:</span>';
+  
+  rowKeys.forEach((rowKey, idx) => {
+    const item = itemMatrix[rowKey];
+    const isChecked = savedSelectedItems.includes(rowKey) ? 'checked' : '';
+    
+    togglesBox.innerHTML += `
+      <label class="chart-toggle-item">
+        <input type="checkbox" value="${rowKey}" ${isChecked} onchange="onChartToggleChange()" />
+        ${item.description}
+      </label>
+    `;
+  });
+
+  updatePlot(months, itemMatrix);
+}
+
+function onChartToggleChange() {
+  const checkboxes = document.querySelectorAll('#chart-toggles-box input[type="checkbox"]');
+  const selected = [];
+  checkboxes.forEach(cb => {
+    if (cb.checked) selected.push(cb.value);
+  });
+  localStorage.setItem('expense_tracker_chart_items', JSON.stringify(selected));
+
+  // Re-render plot with current months & matrix
+  const selectedYear = document.getElementById('year-filter').value;
+  let expenses = allTransactions.filter(t => !t.type.startsWith('income'));
+  if (selectedYear !== 'ALL') expenses = expenses.filter(t => t.year.toString() === selectedYear);
+  
+  const monthSet = new Set();
+  expenses.forEach(t => monthSet.add(`${t.year}-${String(t.month).padStart(2, '0')}`));
+  const sortedMonths = Array.from(monthSet).sort();
+
+  const itemMatrix = {};
   expenses.forEach(t => {
+    const cleanDesc = cleanDescription(t.description);
+    const rowKey = cleanDesc.toLowerCase();
     const mKey = `${t.year}-${String(t.month).padStart(2, '0')}`;
     const amt = parseFloat(t.amount) || 0;
-    if (!catMatrix[t.type]) catMatrix[t.type] = {};
-    catMatrix[t.type][mKey] = (catMatrix[t.type][mKey] || 0) + amt;
-    catTotals[t.type] = (catTotals[t.type] || 0) + amt;
+    if (!itemMatrix[rowKey]) itemMatrix[rowKey] = { description: cleanDesc, months: {}, total: 0 };
+    itemMatrix[rowKey].months[mKey] = (itemMatrix[rowKey].months[mKey] || 0) + amt;
+    itemMatrix[rowKey].total += amt;
   });
 
-  const sortedCats = Object.keys(catTotals).sort((a,b) => catTotals[b] - catTotals[a]);
-  const top4 = sortedCats.slice(0, 4);
+  updatePlot(sortedMonths, itemMatrix);
+}
 
-  const datasets = top4.map((catKey, idx) => {
-    const color = COLOR_PALETTE[idx % COLOR_PALETTE.length];
-    const catName = CATEGORY_NAMES[catKey] || catKey;
-    const dataPoints = months.map(m => catMatrix[catKey]?.[m] || 0);
-
-    return {
-      label: catName,
-      data: dataPoints,
-      borderColor: color,
-      backgroundColor: color + '22',
-      borderWidth: 2,
-      fill: false,
-      tension: 0.2,
-      pointRadius: 4,
-      pointHoverRadius: 7
-    };
+function updatePlot(months, itemMatrix) {
+  // 1. Overall Expenses Dataset (Primary Line)
+  const overallData = months.map(m => {
+    let sum = 0;
+    for (let rK in itemMatrix) {
+      sum += itemMatrix[rK].months[m] || 0;
+    }
+    return sum;
   });
 
-  const ctx = document.getElementById('major-expenses-chart').getContext('2d');
-  if (majorChart) {
-    majorChart.data.labels = months;
-    majorChart.data.datasets = datasets;
-    majorChart.update();
+  const datasets = [{
+    label: 'Overall Expenses',
+    data: overallData,
+    borderColor: '#e05c6a',
+    backgroundColor: 'rgba(224,92,106,0.1)',
+    borderWidth: 3,
+    fill: true,
+    tension: 0.2,
+    pointRadius: 4,
+    pointHoverRadius: 7
+  }];
+
+  // 2. Add checked individual expense items
+  const checkboxes = document.querySelectorAll('#chart-toggles-box input[type="checkbox"]');
+  let colorIdx = 0;
+  checkboxes.forEach(cb => {
+    if (cb.checked && itemMatrix[cb.value]) {
+      const item = itemMatrix[cb.value];
+      const color = COLOR_PALETTE[colorIdx % COLOR_PALETTE.length];
+      colorIdx++;
+
+      const dataPoints = months.map(m => item.months[m] || 0);
+      datasets.push({
+        label: item.description,
+        data: dataPoints,
+        borderColor: color,
+        backgroundColor: color + '22',
+        borderWidth: 2,
+        fill: false,
+        tension: 0.2,
+        pointRadius: 3,
+        pointHoverRadius: 6
+      });
+    }
+  });
+
+  const ctx = document.getElementById('expense-plot').getContext('2d');
+  if (expenseChart) {
+    expenseChart.data.labels = months;
+    expenseChart.data.datasets = datasets;
+    expenseChart.update();
   } else {
-    majorChart = new Chart(ctx, {
+    expenseChart = new Chart(ctx, {
       type: 'line',
       data: { labels: months, datasets: datasets },
       options: {
