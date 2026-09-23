@@ -128,32 +128,79 @@ const FIXED_EXPENSES = [
   {cat:'Other', desc:'שונות'},
 ];
 
+// Combined expense categories (from the Sep 2026 combined format).
+// Seeded for Oct 2026 and later: variable spending is aggregated per
+// category and subscriptions stay as standalone lines, so each month
+// starts with ~23 rows instead of dozens of itemized ones.
+const COMBINED_CATEGORIES = [
+  {cat:'Food', desc:'מצרכי מזון'},
+  {cat:'Food', desc:'אוכל בחוץ'},
+  {cat:'Entertainment', desc:'פנאי ובילוי'},
+  {cat:'Clothing', desc:'אופנה'},
+  {cat:'Housing', desc:'בית'},
+  {cat:'Health', desc:'בריאות'},
+  {cat:'Transport', desc:'תחבורה'},
+  {cat:'Transport', desc:'דלק לרכב'},
+  {cat:'Insurance', desc:'ביטוח'},
+  {cat:'Entertainment', desc:'חופשות בחול'},
+  {cat:'Other', desc:'מתנות'},
+  {cat:'Children', desc:'גנים וילדים'},
+  {cat:'Clothing', desc:'קוסמטיקה'},
+  {cat:'Utilities', desc:'חשמל ומחשבים'},
+  {cat:'Other', desc:'שונות'},
+  // Standalone subscriptions
+  {cat:'Utilities', desc:'Apple'},
+  {cat:'Entertainment', desc:'Spotify'},
+  {cat:'Utilities', desc:'Google One'},
+  {cat:'Utilities', desc:'Cellcom'},
+  {cat:'Utilities', desc:'HOT'},
+  {cat:'Utilities', desc:'HOT Mobile'},
+  {cat:'Utilities', desc:'Partner'},
+  {cat:'Utilities', desc:'CELLO'},
+];
+
 async function loadData(){
   const{year,month}=getYM();CY=year;CM=month;
-  let data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
+  const loadBtn=document.getElementById('load-btn');
+  loadBtn.disabled=true;loadBtn.textContent='Loading...';
+  try{
+    let data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
 
-  // Seed income rows if none exist
-  if(!data.some(r=>r.type.startsWith('income'))){
-    await FF.post('/api/transactions',{year,month,type:'income_salary',description:'Inbal Salary',amount:0});
-    await FF.post('/api/transactions',{year,month,type:'income_salary',description:'Aviv Salary',amount:0});
-    data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
-  }
-
-  // Seed any MISSING fixed expenses (checks each one individually, not all-or-nothing)
-  const existingDescs = new Set(
-    data.filter(r=>r.type==='expense').map(r=>getDesc(r.description))
-  );
-  const missing = FIXED_EXPENSES.filter(e => !existingDescs.has(e.desc));
-  if(missing.length){
-    for(const e of missing){
-      await FF.post('/api/transactions',{year,month,type:'expense',description:'['+e.cat+'] '+e.desc,amount:0});
+    // Seed income rows if none exist
+    if(!data.some(r=>r.type.startsWith('income'))){
+      await Promise.all([
+        FF.post('/api/transactions',{year,month,type:'income_salary',description:'Inbal Salary',amount:0}),
+        FF.post('/api/transactions',{year,month,type:'income_salary',description:'Aviv Salary',amount:0}),
+      ]);
+      data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
     }
-    data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
-  }
 
-  rows=data.map(r=>({...r,_del:false,_new:false}));
-  buildTables();updateKPIs();buildCatChart();
-  await buildTrendChart();
+    // Expense template: combined categories for Oct 2026 and later, legacy
+    // fixed-expense list for earlier months (previous data is never touched).
+    const USE_COMBINED = (year > 2026) || (year === 2026 && month >= 10);
+    const TEMPLATE = USE_COMBINED ? COMBINED_CATEGORIES : FIXED_EXPENSES;
+
+    // Seed any MISSING template expenses (checks each one individually, not all-or-nothing)
+    const existingDescs = new Set(
+      data.filter(r=>r.type==='expense').map(r=>getDesc(r.description))
+    );
+    const missing = TEMPLATE.filter(e => !existingDescs.has(e.desc));
+    if(missing.length){
+      // Seed in parallel — far faster than one-by-one on a fresh month
+      await Promise.all(missing.map(e =>
+        FF.post('/api/transactions',{year,month,type:'expense',description:'['+e.cat+'] '+e.desc,amount:0})
+      ));
+      data=await FF.get(`/api/transactions?year=${year}&month=${month}`);
+    }
+
+    rows=data.map(r=>({...r,_del:false,_new:false}));
+    buildTables();updateKPIs();buildCatChart();
+    await buildTrendChart();
+  }catch(e){
+    FF.toast('Error loading month: '+e.message,'error');
+  }finally{
+    loadBtn.disabled=false;loadBtn.textContent='Load';
+  }
 }
 
 function buildTables(){buildIncome();buildExpenses();}

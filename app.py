@@ -539,8 +539,10 @@ def get_stock_history():
     p1 = int((start_dt - epoch).days) * 86400
     p2 = int((dt.today() - epoch).days) * 86400 + 86400
 
-    # Fetch daily history for each unique symbol
+    # Fetch daily history for each unique symbol (+ SPY as portfolio benchmark)
     symbols = list(set(h['symbol'] for h in holdings if h['symbol']))
+    if 'SPY' not in symbols:
+        symbols.append('SPY')
     series = {}
     for sym in symbols:
         for host in ['query1', 'query2']:

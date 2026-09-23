@@ -101,6 +101,7 @@
   <div class="kpi-grid" id="portfolio-kpis">
     <div class="kpi-card"><div class="kpi-label">Total Investment (Cost)</div><div class="kpi-value skeleton" id="kpi-cost">Loading...</div></div>
     <div class="kpi-card blue"><div class="kpi-label">Total Market Value</div><div class="kpi-value blue skeleton" id="kpi-value">Loading...</div></div>
+    <div class="kpi-card"><div class="kpi-label">Market Value (₪)</div><div class="kpi-value skeleton" id="kpi-value-ils">Loading...</div></div>
     <div class="kpi-card"><div class="kpi-label">Annualized Return (XIRR)</div><div class="kpi-value skeleton" id="kpi-xirr">Loading...</div></div>
     <div class="kpi-card">
         <div class="kpi-label">YTD Return</div>
@@ -115,8 +116,8 @@
   <div class="card mb-24">
     <div class="toolbar">
       <div>
-        <div class="card-title">Portfolio Value vs. Investment & USD</div>
-        <div class="card-subtitle">Track market value, invested capital, and USD baseline trends over time</div>
+        <div class="card-title">Portfolio Value vs. Invested Cost & SPY Benchmark</div>
+        <div class="card-subtitle">Track market value, invested capital, and what the same cash would be worth in SPY</div>
       </div>
       <div class="time-filters" id="chart-filters">
         <button class="btn-filter" data-period="1M">1M</button>
@@ -188,6 +189,7 @@
               <th onclick="sortHoldings('currentShares')">Shares ↕</th>
               <th onclick="sortHoldings('avgCost')">Avg Cost ↕</th>
               <th onclick="sortHoldings('price')">Price ↕</th>
+              <th onclick="sortHoldings('dayPct')">Day % ↕</th>
               <th onclick="sortHoldings('changeVal')">Total Change ↕</th>
               <th onclick="sortHoldings('val')">Market Value ↕</th>
               <th style="width:80px">Actions</th>
@@ -195,8 +197,8 @@
           </thead>
           <tbody id="portfolio-body">
             <!-- Skeleton Initial State -->
-            <tr><td colspan="7"><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
-            <tr><td colspan="7"><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
+            <tr><td colspan="8"><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
+            <tr><td colspan="8"><div class="skeleton" style="height:20px; width:100%;"></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -322,6 +324,9 @@ let rawTrades = [];
 let valChart = null;
 let pieChart = null;
 let masterChartData = []; 
+let masterBenchmarkData = [];
+let usdIlsRate = null;
+let valChartHasBench = null;
 let currentHoldingsList = []; 
 let currentSortKey = 'val';
 let sortDirectionDesc = true;
@@ -353,13 +358,15 @@ function collapseAll() { document.querySelectorAll('.row-buy, .row-sell').forEac
 
 async function loadPortfolio() {
   try {
-    const [holdings, trades, details, history, ytd] = await Promise.all([
+    const [holdings, trades, details, history, ytd, fx] = await Promise.all([
       FF.get('/api/stocks'),
       FF.get('/api/stock-trades'),
       FF.get('/api/stocks/details'),
       FF.get('/api/stocks/history'),
-      FF.get('/api/stocks/ytd')
+      FF.get('/api/stocks/ytd'),
+      FF.get('/api/daughter/fetch-prices').catch(() => ({}))
     ]);
+    usdIlsRate = fx.usd_ils_rate || null;
     
     rawHoldings = holdings;
     rawTrades = trades;
@@ -389,7 +396,7 @@ async function loadPortfolio() {
     renderHeatmap(activeHmPeriod); 
     
   } catch (err) {
-    document.getElementById('portfolio-body').innerHTML = `<tr><td colspan="7" class="val-red">Error loading data: ${err}</td></tr>`;
+    document.getElementById('portfolio-body').innerHTML = `<tr><td colspan="8" class="val-red">Error loading data: ${err}</td></tr>`;
   }
 }
 
@@ -432,6 +439,7 @@ function renderTable() {
     const marketValue = currentShares * mkt.price;
     const totalChangeVal = marketValue - (currentShares * avgCost);
     const totalChangePct = avgCost > 0 ? (totalChangeVal / (currentShares * avgCost)) * 100 : 0;
+    const dayPct = (mkt.prev > 0 && mkt.price > 0) ? ((mkt.price - mkt.prev) / mkt.prev) * 100 : 0;
 
     grandTotalValue += marketValue;
     grandTotalCost += (currentShares * avgCost);
@@ -442,6 +450,7 @@ function renderTable() {
       currentShares, 
       avgCost, 
       price: mkt.price, 
+      dayPct,
       changeVal: totalChangeVal,
       buys: data.buys,
       sells: data.sells
@@ -460,6 +469,7 @@ function renderTable() {
   currentHoldingsList.forEach(item => {
     const sym = item.sym;
     const mktPrice = item.price;
+    const dayPct = item.dayPct || 0;
     const currentShares = item.currentShares;
     const avgCost = item.avgCost;
     const marketValue = item.val;
@@ -472,6 +482,7 @@ function renderTable() {
         <td style="font-family:'DM Mono',monospace">${fmtNum(currentShares)}</td>
         <td style="font-family:'DM Mono',monospace">${fmtMoney(avgCost)}</td>
         <td style="font-family:'DM Mono',monospace">${fmtMoney(mktPrice)}</td>
+        <td style="font-family:'DM Mono',monospace">${formatColor(dayPct, fmtPct(dayPct))}</td>
         <td style="font-family:'DM Mono',monospace">${formatColor(totalChangeVal, fmtMoney(Math.abs(totalChangeVal)) + ' (' + fmtPct(totalChangePct) + ')')}</td>
         <td style="font-family:'DM Mono',monospace; font-weight:600">${fmtMoney(marketValue)}</td>
         <td></td>
@@ -487,6 +498,7 @@ function renderTable() {
           <td style="padding-left: 16px; font-size:11px;">Buy: ${b.purchase_date || 'N/A'}</td>
           <td style="font-family:'DM Mono',monospace">${fmtNum(bShares)}</td>
           <td style="font-family:'DM Mono',monospace">${fmtMoney(bPrice)}</td>
+          <td>--</td>
           <td>--</td>
           <td style="font-family:'DM Mono',monospace">${formatColor(bTotChange, fmtPct(bTotChangePct))}</td>
           <td style="font-family:'DM Mono',monospace">${fmtMoney(bVal)}</td>
@@ -508,6 +520,7 @@ function renderTable() {
           <td style="font-family:'DM Mono',monospace">-${fmtNum(sShares)}</td>
           <td style="font-family:'DM Mono',monospace">${fmtMoney(sPrice)}</td>
           <td>--</td>
+          <td>--</td>
           <td style="font-family:'DM Mono',monospace">Realized: ${formatColor(realized, fmtMoney(Math.abs(realized)))}</td>
           <td>--</td>
           <td><button class="btn btn-danger btn-icon btn-sm" onclick="deleteSell(${s.id})" title="Delete">✕</button></td>
@@ -528,6 +541,13 @@ function renderTable() {
 
   document.getElementById('kpi-cost').textContent = fmtMoney(grandTotalCost);
   document.getElementById('kpi-value').textContent = fmtMoney(grandTotalValue);
+
+  const ilsEl = document.getElementById('kpi-value-ils');
+  if (usdIlsRate && grandTotalValue > 0) {
+    ilsEl.textContent = '₪' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(grandTotalValue * usdIlsRate);
+  } else {
+    ilsEl.textContent = 'N/A';
+  }
 
   if (globalYtdData) {
     // 1. Annualized Return (XIRR)
@@ -605,20 +625,44 @@ function calculateHistoricalData(holdings, trades) {
   
   let events = [];
   holdings.forEach(h => { if(h.purchase_date) events.push({type: 'buy', date: h.purchase_date, sym: h.symbol, qty: +h.quantity, price: +h.purchase_price}); });
-  trades.forEach(t => { if(t.trade_date) events.push({type: 'sell', date: t.trade_date, sym: t.symbol, qty: +t.shares, cost: +t.cost_basis}); });
+  trades.forEach(t => { if(t.trade_date) events.push({type: 'sell', date: t.trade_date, sym: t.symbol, qty: +t.shares, cost: +t.cost_basis, proceeds: (+t.shares) * (+t.sell_price)}); });
   events.sort((a,b) => a.date.localeCompare(b.date));
 
   let pos = {}; 
   let lastKnownPrice = {};
   let eIdx = 0;
   masterChartData = [];
+  masterBenchmarkData = [];
+
+  // SPY benchmark: simulate buying SPY with every invested dollar (and
+  // redeeming SPY shares with every sale's proceeds) to compare performance.
+  const spySeries = historyData['SPY'] || {};
+  const spyDates = Object.keys(spySeries).sort();
+  function spyPriceOn(date) {
+    let lo = 0, hi = spyDates.length - 1, ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (spyDates[mid] <= date) { ans = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    return ans >= 0 ? spySeries[spyDates[ans]] : 0;
+  }
+  let spyShares = 0;
 
   sortedDates.forEach(date => {
     while(eIdx < events.length && events[eIdx].date <= date) {
       let ev = events[eIdx];
       if(!pos[ev.sym]) pos[ev.sym] = {qty: 0, cost: 0};
-      if(ev.type === 'buy') { pos[ev.sym].qty += ev.qty; pos[ev.sym].cost += (ev.qty * ev.price); } 
-      else if(ev.type === 'sell') { pos[ev.sym].qty -= ev.qty; pos[ev.sym].cost -= (ev.qty * ev.cost); }
+      if(ev.type === 'buy') {
+        pos[ev.sym].qty += ev.qty; pos[ev.sym].cost += (ev.qty * ev.price);
+        const sp = spyPriceOn(ev.date);
+        if (sp > 0) spyShares += (ev.qty * ev.price) / sp;
+      }
+      else if(ev.type === 'sell') {
+        pos[ev.sym].qty -= ev.qty; pos[ev.sym].cost -= (ev.qty * ev.cost);
+        const sp = spyPriceOn(ev.date);
+        if (sp > 0 && ev.proceeds) spyShares = Math.max(0, spyShares - ev.proceeds / sp);
+      }
       eIdx++;
     }
 
@@ -632,7 +676,10 @@ function calculateHistoricalData(holdings, trades) {
         totalCost += pos[sym].cost;
       }
     }
-    if (hasPositions) masterChartData.push({ date: date, value: totalVal, cost: totalCost });
+    if (hasPositions) {
+      const spNow = spyPriceOn(date) || 0;
+      masterChartData.push({ date: date, value: totalVal, cost: totalCost, bench: spyShares * spNow });
+    }
   });
 
   // Calculate 30-Day Volatility Metric
@@ -673,28 +720,32 @@ function renderMainChart(period) {
   const labels = filteredData.map(d => d.date);
   const valData = filteredData.map(d => d.value);
   const costData = filteredData.map(d => d.cost);
-  const usdLine = costData; 
+  const benchData = filteredData.map(d => d.bench || 0);
+  const wantBench = benchData.some(v => v > 0);
+
+  const datasets = [
+    { label: 'Total Value ($)', data: valData, borderColor: '#5b8df6', backgroundColor: 'rgba(91,141,246,0.1)', borderWidth: 2, fill: true, pointRadius: 0, pointHoverRadius: 4, tension: 0.2 },
+    { label: 'Invested Cost ($)', data: costData, borderColor: '#9aa0bb', borderWidth: 2, borderDash: [5, 5], fill: false, pointRadius: 0, pointHoverRadius: 0, tension: 0.2 }
+  ];
+  if (wantBench) {
+    datasets.push({ label: 'SPY Benchmark ($)', data: benchData, borderColor: '#4caf88', borderWidth: 1.5, borderDash: [5, 5], fill: false, pointRadius: 0, pointHoverRadius: 0, tension: 0.2 });
+  }
 
   const ctx = document.getElementById('value-chart').getContext('2d');
   
   // Performance Optimization: Update existing chart data instead of destroying and recreating
-  if (valChart) {
+  if (valChart && valChartHasBench === wantBench) {
     valChart.data.labels = labels;
     valChart.data.datasets[0].data = valData;
     valChart.data.datasets[1].data = costData;
-    valChart.data.datasets[2].data = usdLine;
+    if (wantBench) valChart.data.datasets[2].data = benchData;
     valChart.update();
   } else {
+    if (valChart) valChart.destroy();
+    valChartHasBench = wantBench;
     valChart = new Chart(ctx, {
       type: 'line',
-      data: {
-        labels: labels,
-        datasets: [
-          { label: 'Total Value ($)', data: valData, borderColor: '#5b8df6', backgroundColor: 'rgba(91,141,246,0.1)', borderWidth: 2, fill: true, pointRadius: 0, pointHoverRadius: 4, tension: 0.2 },
-          { label: 'Invested Cost ($)', data: costData, borderColor: '#9aa0bb', borderWidth: 2, borderDash: [5, 5], fill: false, pointRadius: 0, pointHoverRadius: 0, tension: 0.2 },
-          { label: 'USD Baseline ($)', data: usdLine, borderColor: '#4caf88', borderWidth: 1.5, fill: false, pointRadius: 0, pointHoverRadius: 0, tension: 0.2 }
-        ]
-      },
+      data: { labels: labels, datasets: datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: {
